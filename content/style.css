@@ -1,0 +1,414 @@
+/* ===== AI Reader — panel styling ===== */
+.aireader-root {
+  --air-accent: var(--color-accent, #3b7ddd);
+  --air-surface: var(--material-background, var(--color-background, #fff));
+  --air-bubble: var(--fill-quinary, rgba(127,127,127,0.10));
+  --air-border: var(--fill-quarternary, rgba(127,127,127,0.22));
+  --air-muted: var(--fill-secondary, #8a8f98);
+  font-size: 13px;
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 4px 4px;
+  color: var(--fill-primary, inherit);
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* kill native OS button chrome everywhere in the panel */
+.aireader-root button,
+.aireader-root textarea,
+.aireader-chip, .aireader-send, .aireader-btn, .aireader-modelpill,
+.aireader-foot-btn, .aireader-top-btn, .aireader-fmt {
+  -moz-appearance: none;
+  appearance: none;
+  font-family: inherit;
+}
+
+/* ---- top row (save-note + settings) ---- */
+.aireader-top { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.aireader-top-btn {
+  font-size: 11.5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--air-border);
+  color: var(--fill-secondary, inherit);
+  cursor: pointer;
+}
+.aireader-top-btn:hover { border-color: var(--air-accent); color: var(--air-accent); }
+
+/* ---- assistant message action row ---- */
+.aireader-actions { display: flex; gap: 12px; margin: 4px 2px 0; }
+.aireader-action {
+  font-size: 11px;
+  color: var(--air-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.aireader-action:hover { color: var(--air-accent); }
+
+/* ---- citation hover preview ---- */
+.aireader-preview {
+  position: absolute;
+  z-index: 30;
+  max-width: 300px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: var(--air-surface);
+  border: 1px solid var(--air-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.2);
+  pointer-events: none;
+  color: var(--fill-primary, inherit);
+}
+
+/* ---- send button in "stop" state ---- */
+.aireader-send-stop { background: var(--accent-red, #e5534b) !important; font-size: 12px; }
+
+/* ---- top bar ---- */
+.aireader-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.aireader-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--air-border);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, opacity .12s;
+}
+.aireader-btn:hover { background: var(--air-bubble); }
+.aireader-btn:disabled { opacity: .45; cursor: default; }
+.aireader-btn-primary {
+  border-color: transparent;
+  background: var(--air-accent);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0,0,0,.12);
+}
+.aireader-btn-primary:hover { background: var(--air-accent); filter: brightness(1.06); }
+.aireader-gear {
+  margin-inline-start: auto;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 6px;
+  opacity: .6;
+}
+.aireader-gear:hover { opacity: 1; background: var(--air-bubble); }
+
+/* ---- status line ---- */
+.aireader-status { font-size: 11.5px; color: var(--air-muted); min-height: 0; }
+.aireader-status:empty { display: none; }
+.aireader-status-error { color: var(--accent-red, #e5534b); }
+.aireader-status-ok { color: var(--accent-green, #3fae5a); }
+.aireader-status-busy { color: var(--air-accent); }
+
+/* ---- messages ---- */
+.aireader-chat-msgs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* A tall, self-contained chat card. Zotero gives plugins only an item-pane
+     section (no standalone sidebar), so we size by viewport and scroll inside. */
+  height: clamp(240px, 56vh, 700px);
+  overflow-y: auto;
+  padding: 4px 2px;
+  scrollbar-width: thin;
+}
+.aireader-chat-msgs:empty::before {
+  content: "问点什么，或点下面的快捷按钮 ✨";
+  margin: auto;
+  color: var(--air-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.aireader-msg { display: flex; }
+.aireader-msg-user { justify-content: flex-end; }
+.aireader-msg-assistant { justify-content: flex-start; }
+
+.aireader-bubble {
+  max-width: 92%;
+  padding: 9px 12px;
+  border-radius: 14px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.aireader-msg-user .aireader-bubble {
+  background: var(--air-accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  white-space: pre-wrap;
+}
+.aireader-msg-assistant .aireader-bubble {
+  background: var(--air-bubble);
+  border: 1px solid var(--air-border);
+  border-bottom-left-radius: 4px;
+}
+.aireader-bubble.aireader-streaming { white-space: pre-wrap; }
+.aireader-bubble.aireader-streaming::after {
+  content: "▋";
+  margin-inline-start: 1px;
+  color: var(--air-accent);
+  animation: aireader-blink 1s steps(2) infinite;
+}
+@keyframes aireader-blink { 0%,100% { opacity: .25; } 50% { opacity: .9; } }
+
+/* ---- markdown inside assistant bubbles ---- */
+.aireader-md-p { margin: 0 0 7px; }
+.aireader-md-p:last-child { margin-bottom: 0; }
+.aireader-md-ul { margin: 2px 0 7px; padding-inline-start: 18px; }
+.aireader-md-ul li { margin: 2px 0; }
+.aireader-bubble strong { font-weight: 650; }
+.aireader-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--fill-quarternary, rgba(127,127,127,0.18));
+}
+
+/* ---- citation badge (jump to source) ---- */
+.aireader-ref {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--air-accent) 16%, transparent);
+  color: var(--air-accent);
+  cursor: pointer;
+  text-decoration: none;
+  vertical-align: baseline;
+  position: relative;
+  top: -1px;
+}
+.aireader-ref:hover { background: var(--air-accent); color: #fff; }
+.aireader-msg-user .aireader-ref { background: rgba(255,255,255,.25); color: #fff; }
+
+/* ---- AI-suggested annotation apply button ---- */
+.aireader-apply {
+  display: inline-block;
+  margin: 2px 3px;
+  padding: 1px 9px;
+  font-size: 11px;
+  line-height: 17px;
+  border-radius: 999px;
+  border: 1px dashed var(--air-accent);
+  color: var(--air-accent);
+  background: transparent;
+  cursor: pointer;
+  text-decoration: none;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.aireader-apply:hover { background: var(--air-accent); color: #fff; border-style: solid; }
+.aireader-apply-done {
+  border: 1px solid var(--accent-green, #3fae5a);
+  background: var(--accent-green, #3fae5a);
+  color: #fff;
+}
+.aireader-figbtn {
+  border-style: solid;
+  border-color: var(--accent-purple, #a28ae5);
+  color: var(--accent-purple, #a28ae5);
+}
+.aireader-figbtn:hover { background: var(--accent-purple, #a28ae5); color: #fff; }
+
+/* ---- suggested-question chips ---- */
+.aireader-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.aireader-chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--air-bubble);
+  color: var(--fill-primary, inherit);
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.aireader-chip:hover {
+  background: color-mix(in srgb, var(--air-accent) 14%, transparent);
+  border-color: var(--air-accent);
+  color: var(--air-accent);
+}
+
+/* ---- composer (input + round send) ---- */
+.aireader-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  border: 1px solid var(--air-border);
+  border-radius: 16px;
+  padding: 8px 8px 8px 14px;
+  background: var(--air-surface);
+  transition: border-color .12s, box-shadow .12s;
+}
+.aireader-composer:focus-within {
+  border-color: var(--air-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--air-accent) 16%, transparent);
+}
+.aireader-chat-input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+  max-height: 140px;
+  padding: 3px 0;
+  overflow-y: auto;
+}
+.aireader-chat-input::placeholder { color: var(--air-muted); }
+.aireader-chat-input:disabled { opacity: .5; }
+.aireader-send {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--air-accent);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: filter .12s, opacity .12s;
+}
+.aireader-send:hover { filter: brightness(1.08); }
+.aireader-send:disabled { opacity: .4; cursor: default; }
+
+/* ---- footer (model selector + clear) ---- */
+.aireader-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+}
+.aireader-foot-spacer { flex: 1; }
+.aireader-modelpill {
+  font: inherit;
+  font-size: 11.5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--air-border);
+  background: var(--air-surface);
+  color: var(--fill-secondary, inherit);
+  cursor: pointer;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aireader-modelpill:hover { border-color: var(--air-accent); color: var(--air-accent); }
+.aireader-foot-btn {
+  font: inherit;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: var(--air-muted);
+  cursor: pointer;
+}
+.aireader-foot-btn:hover { background: var(--air-bubble); color: inherit; }
+
+/* ---- model dropdown ---- */
+.aireader-modelmenu {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 40px;
+  z-index: 20;
+  background: var(--air-surface);
+  border: 1px solid var(--air-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.22);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.aireader-fmtrow { display: flex; gap: 6px; }
+.aireader-fmt {
+  flex: 1;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--air-border);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.aireader-fmt-on { background: var(--air-accent); color: #fff; border-color: transparent; }
+.aireader-modellist {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12px;
+  color: var(--air-muted);
+}
+.aireader-modelitem {
+  padding: 6px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--fill-primary, inherit);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aireader-modelitem:hover { background: var(--air-bubble); }
+.aireader-modelitem-on { color: var(--air-accent); font-weight: 600; }
+.aireader-modelitem-on::after { content: " ✓"; }
+
+/* ===== Full-height "chat view" (layout borrowed from llm-for-zotero):
+   when :root[data-air-view="chat"] is set, our section takes over the whole
+   item/context pane — native header + other sections + our collapsible head
+   are hidden and every wrapper becomes a full-height flex column. Still uses
+   only the official item-pane section API (no DOM injection). ===== */
+:root[data-air-view="chat"] .zotero-view-item-main {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+:root[data-air-view="chat"] item-details .zotero-view-item {
+  flex: 1 1 0; min-height: 0; overflow: auto; padding: 0;
+}
+:root[data-air-view="chat"] item-details .zotero-view-item::before,
+:root[data-air-view="chat"] item-details .zotero-view-item::after { display: none !important; }
+:root[data-air-view="chat"] item-details item-pane-header { display: none !important; }
+:root[data-air-view="chat"] item-details .zotero-view-item > [data-pane]:not([data-pane="ai-reader-summary"]) { display: none !important; }
+:root[data-air-view="chat"] item-pane-custom-section[data-pane="ai-reader-summary"] > collapsible-section > .head { display: none !important; }
+:root[data-air-view="chat"] item-pane-custom-section[data-pane="ai-reader-summary"],
+:root[data-air-view="chat"] item-pane-custom-section[data-pane="ai-reader-summary"] > collapsible-section,
+:root[data-air-view="chat"] item-pane-custom-section[data-pane="ai-reader-summary"] > collapsible-section > [data-type="body"] {
+  display: flex; flex-direction: column; height: 100%; min-height: 0; max-height: none;
+  margin: 0; padding: 0; box-sizing: border-box; overflow: hidden;
+}
+:root[data-air-view="chat"] .aireader-root { height: 100%; min-height: 0; padding: 8px 8px 6px; }
+:root[data-air-view="chat"] .aireader-chat-msgs { flex: 1 1 auto !important; height: auto !important; }

@@ -1,0 +1,65 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml">
+  <groupbox>
+    <label><html:h2 data-l10n-id="aireader-prefs-title">AI Reader</html:h2></label>
+
+    <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-format" control="aireader-format">API format</label>
+      <menulist id="aireader-format" native="true" preference="extensions.zotero.aireader.apiFormat">
+        <menupopup>
+          <menuitem label="OpenAI /chat/completions" value="chat"/>
+          <menuitem label="OpenAI /responses" value="responses"/>
+          <menuitem label="Anthropic /messages" value="anthropic"/>
+        </menupopup>
+      </menulist>
+    </hbox>
+
+    <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-baseurl" control="aireader-baseurl">Base URL</label>
+      <html:input id="aireader-baseurl" type="text" style="flex:1;"
+                  preference="extensions.zotero.aireader.baseURL"
+                  placeholder="https://api.openai.com/v1"/>
+    </hbox>
+
+    <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-apikey" control="aireader-apikey">API Key</label>
+      <html:input id="aireader-apikey" type="password" style="flex:1;"
+                  preference="extensions.zotero.aireader.apiKey"/>
+    </hbox>
+
+    <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-model" control="aireader-model">Model</label>
+      <html:input id="aireader-model" type="text" style="flex:1;"
+                  preference="extensions.zotero.aireader.model"
+                  placeholder="gpt-4o-mini"/>
+    </hbox>
+
+    <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-language" control="aireader-language">Output language</label>
+      <menulist id="aireader-language" native="true" preference="extensions.zotero.aireader.language">
+        <menupopup>
+          <menuitem label="中文" value="中文"/>
+          <menuitem label="English" value="English"/>
+          <menuitem label="日本語" value="日本語"/>
+        </menupopup>
+      </menulist>
+    </hbox>
+
+    <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-temperature" control="aireader-temperature">Temperature</label>
+      <html:input id="aireader-temperature" type="text" size="6"
+                  preference="extensions.zotero.aireader.temperature"/>
+    </hbox>
+
+    <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-maxchars" control="aireader-maxchars">Max characters sent</label>
+      <html:input id="aireader-maxchars" type="number" size="8"
+                  preference="extensions.zotero.aireader.maxChars"/>
+    </hbox>
+
+    <hbox align="center">
+      <button id="aireader-test" data-l10n-id="aireader-prefs-test" label="Test connection"/>
+      <label id="aireader-test-result" style="margin-inline-start: 8px;"/>
+    </hbox>
+  </groupbox>
+</vbox>

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "AI Reader",
+  "version": "0.5.0",
+  "description": "AI-assisted paper reading: grounded chat with click-to-source citations, AI highlights/notes into the PDF, save-to-note, retrieval, and selectable API formats.",
+  "author": "dongzhe05",
+  "icons": {
+    "48": "content/icons/ai48.png",
+    "96": "content/icons/ai96.png"
+  },
+  "applications": {
+    "zotero": {
+      "id": "ai-reader@local.plugin",
+      "update_url": "https://example.com/updates.json",
+      "strict_min_version": "7.0",
+      "strict_max_version": "11.*"
+    }
+  }
+}
