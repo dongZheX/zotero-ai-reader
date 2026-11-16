@@ -203,40 +203,25 @@ AIReader = {
   // Make the chat area fill the actual available height of the item/context
   // pane and track window/pane/section size changes (Zotero has no standalone
   // sidebar, so we measure and resize ourselves).
+  // Debounced window-resize only. We deliberately do NOT use a ResizeObserver
+  // here: observing the item-pane scroll container while we set the chat
+  // height feeds back into the observer and can hang Zotero's layout.
   _setupAutoHeight(state) {
     const win = state.doc.defaultView;
-    const resize = () => this.resizeChat(state);
+    const resize = () => {
+      if (state._rt) win.clearTimeout(state._rt);
+      state._rt = win.setTimeout(() => this.resizeChat(state), 80);
+    };
     state._onResize = resize;
     try { win.addEventListener("resize", resize); } catch (e) {}
-    try {
-      if (win.ResizeObserver) {
-        const sp = this._scrollParent(state.chatMsgs) || state.body;
-        const ro = new win.ResizeObserver(() => resize());
-        ro.observe(sp);
-        state._ro = ro;
-      }
-    } catch (e) {}
-    win.setTimeout(resize, 0);
-    win.setTimeout(resize, 200);
+    win.setTimeout(() => this.resizeChat(state), 0);
+    win.setTimeout(() => this.resizeChat(state), 250);
   },
 
   _cleanup(state) {
     try { if (state._onResize) state.doc.defaultView.removeEventListener("resize", state._onResize); } catch (e) {}
-    try { if (state._ro) state._ro.disconnect(); } catch (e) {}
+    try { if (state._rt) state.doc.defaultView.clearTimeout(state._rt); } catch (e) {}
     this.closeModelMenu(state);
-  },
-
-  _scrollParent(el) {
-    try {
-      const win = el.ownerDocument.defaultView;
-      let n = el.parentElement;
-      while (n) {
-        const oy = win.getComputedStyle(n).overflowY;
-        if (oy === "auto" || oy === "scroll") return n;
-        n = n.parentElement;
-      }
-    } catch (e) {}
-    return null;
   },
 
   resizeChat(state) {
@@ -249,6 +234,8 @@ AIReader = {
         + (state.composer ? state.composer.offsetHeight : 0)
         + (state.footer ? state.footer.offsetHeight : 0) + 40;
       const h = Math.max(160, Math.floor(win.innerHeight - top - below));
+      if (Math.abs(h - (state._lastH || 0)) < 3) return; // anti-oscillation guard
+      state._lastH = h;
       msgs.style.height = h + "px";
     } catch (e) {}
   },
