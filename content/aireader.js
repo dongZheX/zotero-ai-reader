@@ -41,6 +41,7 @@ AIReader = {
     try { Zotero.ItemPaneManager.unregisterSection("ai-reader-summary"); } catch (e) {}
     try { if (this._prefPaneID) Zotero.PreferencePanes.unregister(this._prefPaneID); } catch (e) {}
     try { if (this._selectionHandler) Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this._selectionHandler); } catch (e) {}
+    try { if (this._ctxHandler) { Zotero.Reader.unregisterEventListener("createViewContextMenu", this._ctxHandler); Zotero.Reader.unregisterEventListener("createSelectorContextMenu", this._ctxHandler); } } catch (e) {}
   },
 
   registerSection() {
@@ -52,7 +53,6 @@ AIReader = {
       onItemChange: ({ item, setEnabled }) => { setEnabled(AIReader.canHandle(item)); return true; },
       onRender: ({ body, item, doc }) => { AIReader.renderSkeleton(body, item, doc); },
       onAsyncRender: async ({ body, item, doc }) => { await AIReader.hydrate(body, item, doc); },
-      onToggle: ({ body }) => { const s = AIReader._bodyState.get(body); if (s) AIReader.resizeChat(s); },
     });
   },
 
@@ -69,6 +69,37 @@ AIReader = {
   registerReaderPopup() {
     this._selectionHandler = (event) => AIReader.onSelectionPopup(event);
     Zotero.Reader.registerEventListener("renderTextSelectionPopup", this._selectionHandler, this.id);
+    this._ctxHandler = (event) => AIReader.onReaderContextMenu(event);
+    try { Zotero.Reader.registerEventListener("createViewContextMenu", this._ctxHandler, this.id); } catch (e) {}
+    try { Zotero.Reader.registerEventListener("createSelectorContextMenu", this._ctxHandler, this.id); } catch (e) {}
+  },
+
+  _readerSelection(reader) {
+    try {
+      const win = reader && reader._internalReader && reader._internalReader._primaryView && reader._internalReader._primaryView._iframeWindow;
+      const s = win && win.getSelection && win.getSelection().toString();
+      return (s || "").trim();
+    } catch (e) { return ""; }
+  },
+
+  onReaderContextMenu(event) {
+    try {
+      const { reader, append } = event;
+      if (typeof append !== "function") return;
+      const text = this._readerSelection(reader);
+      if (!text) return;
+      if (!this.getPref("apiKey")) return;
+      const lang = this.getPref("language") || "中文";
+      append({ label: "在右侧问 AI", onCommand: () => this.askFromSelection(reader, text) });
+      append({
+        label: "AI 解释", onCommand: async () => {
+          try { await this.askFromSelection(reader, "请解释这段原文：\n“" + text + "”"); } catch (e) {}
+        },
+      });
+      append({
+        label: "AI 翻译", onCommand: () => this.askFromSelection(reader, "请把这段原文翻译成" + lang + "：\n“" + text + "”"),
+      });
+    } catch (e) { this.log("ctxmenu error: " + e); }
   },
 
   onMainWindowLoad() {}, onMainWindowUnload() {},
@@ -89,10 +120,14 @@ AIReader = {
 
   // ------------------------------------------------------------------- UI
   injectCSS(doc) {
-    if (doc.getElementById("aireader-style")) return;
-    const link = doc.createElementNS("http://www.w3.org/1999/xhtml", "link");
-    link.id = "aireader-style"; link.rel = "stylesheet"; link.href = this.rootURI + "content/style.css";
-    (doc.head || doc.documentElement).appendChild(link);
+    const add = (id, href) => {
+      if (doc.getElementById(id)) return;
+      const link = doc.createElementNS("http://www.w3.org/1999/xhtml", "link");
+      link.id = id; link.rel = "stylesheet"; link.href = href;
+      (doc.head || doc.documentElement).appendChild(link);
+    };
+    add("aireader-katex", this.rootURI + "content/vendor/katex/katex.min.css");
+    add("aireader-style", this.rootURI + "content/style.css");
   },
 
   _el(doc, tag, cls, text) {
@@ -104,7 +139,7 @@ AIReader = {
 
   renderSkeleton(body, item, doc) {
     const old = this._bodyState.get(body);
-    if (old) this._cleanup(old);
+    if (old) this.closeModelMenu(old);
     this.injectCSS(doc);
     body.textContent = "";
     body.classList.add("aireader-root");
@@ -113,14 +148,10 @@ AIReader = {
     const noteBtn = this._el(doc, "div", "aireader-top-btn", "存为笔记");
     noteBtn.title = "把当前对话存为 Zotero 笔记";
     noteBtn.addEventListener("click", () => this.saveNote(body));
-    const viewBtn = this._el(doc, "div", "aireader-top-btn aireader-viewbtn", "⤢ 独占");
-    viewBtn.title = "让对话独占整个右栏 / 还原";
-    viewBtn.addEventListener("click", () => this.toggleChatView(body));
     const gear = this._el(doc, "div", "aireader-gear", "⚙");
     gear.title = "Settings";
     gear.addEventListener("click", () => Zotero.Utilities.Internal.openPreferences(AIReader._prefPaneID));
     top.appendChild(noteBtn);
-    top.appendChild(viewBtn);
     top.appendChild(this._el(doc, "div", "aireader-foot-spacer"));
     top.appendChild(gear);
     body.appendChild(top);
@@ -172,74 +203,19 @@ AIReader = {
 
     const state = {
       item, attachment: null, blocks: null, doc, body,
-      status, chatMsgs, input, send, modelPill, chips, composer, footer, preview, viewBtn,
+      status, chatMsgs, input, send, modelPill, chips, composer, footer, preview,
       modelMenu: null, modelList: null, _onDoc: null, streaming: false, cancel: false,
-      _onResize: null, _ro: null,
     };
     this._bodyState.set(body, state);
     this.updateModelPill(state);
-    this._setupAutoHeight(state);
-    this.applyChatView(state, this.getPref("chatView") === true || this.getPref("chatView") === "true");
-  },
-
-  toggleChatView(body) {
-    const state = this._bodyState.get(body);
-    if (!state) return;
-    const on = !(state.doc.documentElement.getAttribute("data-air-view") === "chat");
-    Zotero.Prefs.set("aireader.chatView", on);
-    this.applyChatView(state, on);
-  },
-
-  applyChatView(state, on) {
-    try {
-      const root = state.doc.documentElement;
-      if (on) root.setAttribute("data-air-view", "chat");
-      else root.removeAttribute("data-air-view");
-    } catch (e) {}
-    if (state.viewBtn) state.viewBtn.textContent = on ? "⤡ 还原" : "⤢ 独占";
-    if (!on) this.resizeChat(state); // restore measured height in stacked mode
+    // Safety: clear any stale full-height attribute from older versions so the
+    // panel can never get stranded blank.
+    try { state.doc.documentElement.removeAttribute("data-air-view"); } catch (e) {}
   },
 
   // Make the chat area fill the actual available height of the item/context
   // pane and track window/pane/section size changes (Zotero has no standalone
   // sidebar, so we measure and resize ourselves).
-  // Debounced window-resize only. We deliberately do NOT use a ResizeObserver
-  // here: observing the item-pane scroll container while we set the chat
-  // height feeds back into the observer and can hang Zotero's layout.
-  _setupAutoHeight(state) {
-    const win = state.doc.defaultView;
-    const resize = () => {
-      if (state._rt) win.clearTimeout(state._rt);
-      state._rt = win.setTimeout(() => this.resizeChat(state), 80);
-    };
-    state._onResize = resize;
-    try { win.addEventListener("resize", resize); } catch (e) {}
-    win.setTimeout(() => this.resizeChat(state), 0);
-    win.setTimeout(() => this.resizeChat(state), 250);
-  },
-
-  _cleanup(state) {
-    try { if (state._onResize) state.doc.defaultView.removeEventListener("resize", state._onResize); } catch (e) {}
-    try { if (state._rt) state.doc.defaultView.clearTimeout(state._rt); } catch (e) {}
-    this.closeModelMenu(state);
-  },
-
-  resizeChat(state) {
-    try {
-      if (state.doc.documentElement.getAttribute("data-air-view") === "chat") return; // CSS fills height
-      const msgs = state.chatMsgs; if (!msgs || !msgs.getBoundingClientRect) return;
-      const win = state.doc.defaultView;
-      const top = msgs.getBoundingClientRect().top;
-      const below = (state.chips ? state.chips.offsetHeight : 0)
-        + (state.composer ? state.composer.offsetHeight : 0)
-        + (state.footer ? state.footer.offsetHeight : 0) + 40;
-      const h = Math.max(160, Math.floor(win.innerHeight - top - below));
-      if (Math.abs(h - (state._lastH || 0)) < 3) return; // anti-oscillation guard
-      state._lastH = h;
-      msgs.style.height = h + "px";
-    } catch (e) {}
-  },
-
   setComposerEnabled(state, on) {
     if (state.input) state.input.disabled = !on;
     if (state.send) state.send.disabled = !on;
@@ -346,7 +322,6 @@ AIReader = {
       if (!hist) { hist = (await this.loadChat(att)) || []; this._chatStore.set(att.key, hist); }
       this.renderChatHistory(state, hist);
       this.setStatus(state, "", "muted");
-      this.resizeChat(state);
     } catch (e) { this.log("hydrate error: " + e); this.setStatus(state, "Error: " + e.message, "error"); }
   },
 
@@ -572,15 +547,28 @@ AIReader = {
     bubble.classList.add("aireader-streaming");
     state.streaming = true; state.cancel = false; this.updateSendButton(state);
 
+    const meta = {};
     try {
       await this.ensureBlocks(state);
-      this.setStatus(state, "", "");
       const ctx = opts.broad ? this.buildContext(state.blocks) : this.buildRetrievedContext(state.blocks, text);
+      meta.ctxChars = ctx.length;
+      this.setStatus(state, "生成中…", "busy");
       const messages = [{ role: "system", content: this.systemPrompt(ctx) }, ...hist.slice(-12), { role: "user", content: text }];
-      const full = await this.callLLMStream(messages, (d) => { bubble.textContent += d; state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight; }, () => state.cancel);
+
+      let acc = "", lastR = 0;
+      const full = await this.callLLMStream(messages, (d) => {
+        acc += d;
+        const now = Date.now();
+        if (now - lastR > 140) { lastR = now; try { this.renderRich(state, bubble, acc); } catch (e) { bubble.textContent = acc; } }
+        this.setStatus(state, "生成中… " + acc.length + " 字", "busy");
+        state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight;
+      }, () => state.cancel, meta);
+
       bubble.classList.remove("aireader-streaming");
       this.enhanceMessage(state, bubble, full);
       this.addAssistantActions(state, msg, full, text);
+      this.addMetaLine(state, msg, meta, full);
+      this.setStatus(state, "", "");
       if (!opts.skipUser) hist.push({ role: "user", content: text });
       hist.push({ role: "assistant", content: full });
       this.saveChat(state.attachment, hist).catch(() => {});
@@ -593,8 +581,99 @@ AIReader = {
     }
   },
 
-  // Rebuild assistant bubble: Markdown + citations + annotation buttons.
+  // Small per-message line: token usage (if the API reported it) + context size.
+  addMetaLine(state, msg, meta, full) {
+    try {
+      const doc = state.doc;
+      const outTok = meta.outTok != null ? meta.outTok : Math.round([...(full || "")].length / 3);
+      const inTok = meta.inTok != null ? ("⬆ " + meta.inTok + " ") : "";
+      const approx = meta.outTok != null ? "" : "~";
+      const ctxk = meta.ctxChars != null ? (" · 上下文 " + (meta.ctxChars >= 1000 ? (meta.ctxChars / 1000).toFixed(1) + "k" : meta.ctxChars) + " 字") : "";
+      const line = this._el(doc, "div", "aireader-meta", inTok + "⬇ " + approx + outTok + " tok" + ctxk);
+      msg.appendChild(line);
+    } catch (e) {}
+  },
+
+  // Rebuild assistant bubble. Prefer full Markdown + KaTeX rendering; fall back
+  // to the lightweight line renderer if the libs are missing or anything throws
+  // (so a render error can never blank the panel).
   enhanceMessage(state, bubble, text) {
+    try {
+      if (typeof marked !== "undefined" && marked && typeof marked.parse === "function") {
+        this.renderRich(state, bubble, text);
+        return;
+      }
+    } catch (e) { this.log("rich render failed, falling back: " + e); }
+    this._renderLines(state, bubble, text);
+  },
+
+  // --- rich (markdown + math) ---
+  _extractMath(text) {
+    const maths = [];
+    const stash = (tex, display) => { maths.push({ tex, display }); return "\u0000M" + (maths.length - 1) + "\u0000"; };
+    let t = text;
+    t = t.replace(/\$\$([\s\S]+?)\$\$/g, (m, tex) => stash(tex, true));
+    t = t.replace(/\\\[([\s\S]+?)\\\]/g, (m, tex) => stash(tex, true));
+    t = t.replace(/\\\(([\s\S]+?)\\\)/g, (m, tex) => stash(tex, false));
+    t = t.replace(/(?<![\w$])\$(?!\s)([^\n$]+?)\$(?![\w$])/g, (m, tex) => stash(tex, false));
+    return { t, maths };
+  },
+
+  _mathAndMarkdown(text) {
+    const { t, maths } = this._extractMath(text || "");
+    let html = marked.parse(t, { breaks: true, gfm: true });
+    html = html.replace(/\u0000M(\d+)\u0000/g, (m, i) => {
+      const o = maths[+i]; if (!o) return "";
+      try { return (typeof katex !== "undefined") ? katex.renderToString(o.tex, { displayMode: o.display, throwOnError: false }) : o.tex; }
+      catch (e) { return o.tex; }
+    });
+    return html;
+  },
+
+  renderRich(state, bubble, text) {
+    const doc = state.doc;
+    const html = this._mathAndMarkdown(text);
+    const tmp = doc.createElement("div");
+    tmp.innerHTML = html;
+    this._sanitize(tmp);
+    bubble.textContent = "";
+    bubble.classList.add("aireader-rich");
+    while (tmp.firstChild) bubble.appendChild(tmp.firstChild);
+    this._linkifyTokens(state, bubble);
+  },
+
+  // Strip anything executable from model-produced HTML before insertion.
+  _sanitize(root) {
+    try {
+      root.querySelectorAll("script,style,iframe,object,embed,link,meta,base,form,input,button").forEach((n) => n.remove());
+      root.querySelectorAll("*").forEach((el) => {
+        for (const a of Array.from(el.attributes)) {
+          const n = a.name.toLowerCase();
+          if (n.startsWith("on")) el.removeAttribute(a.name);
+          if ((n === "href" || n === "src") && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
+        }
+      });
+    } catch (e) {}
+  },
+
+  // Walk rendered text nodes and turn [B<id>] / [[hl|note|fig:id]] into elements.
+  _linkifyTokens(state, root) {
+    const doc = state.doc;
+    const re = /\[\[(?:hl|note|fig):\d+|\[B\d+\]/;
+    const targets = [];
+    try {
+      const walker = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
+      let n; while ((n = walker.nextNode())) { if (re.test(n.nodeValue)) targets.push(n); }
+    } catch (e) { return; }
+    for (const tn of targets) {
+      const frag = doc.createDocumentFragment();
+      this.renderInline(state, frag, tn.nodeValue);
+      if (tn.parentNode) tn.parentNode.replaceChild(frag, tn);
+    }
+  },
+
+  // --- fallback line renderer (no libs) ---
+  _renderLines(state, bubble, text) {
     const doc = state.doc;
     bubble.textContent = "";
     const lines = (text || "").split(/\r?\n/);
@@ -874,15 +953,36 @@ AIReader = {
   _bodyFor(fmt, messages, stream) {
     const model = this.getPref("model");
     const t = parseFloat(this.getPref("temperature")); const temp = isNaN(t) ? 0.3 : t;
-    if (fmt === "responses") return JSON.stringify({ model, input: messages, temperature: temp, stream: !!stream });
+    // maxTokens: 0 (or unset) => do not cap (Anthropic requires the field, so use a generous fallback).
+    const mtRaw = parseInt(this.getPref("maxTokens"), 10);
+    const maxTok = isNaN(mtRaw) || mtRaw <= 0 ? 0 : mtRaw;
+    if (fmt === "responses") {
+      const body = { model, input: messages, temperature: temp, stream: !!stream };
+      if (maxTok) body.max_output_tokens = maxTok;
+      return JSON.stringify(body);
+    }
     if (fmt === "anthropic") {
       const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
       const msgs = messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
-      const body = { model, messages: msgs, max_tokens: 4096, temperature: temp, stream: !!stream };
+      // Anthropic requires max_tokens; when uncapped, request a large ceiling so answers aren't truncated.
+      const body = { model, messages: msgs, max_tokens: maxTok || 32000, temperature: temp, stream: !!stream };
       if (system) body.system = system;
       return JSON.stringify(body);
     }
-    return JSON.stringify({ model, messages, temperature: temp, stream: !!stream });
+    const body = { model, messages, temperature: temp, stream: !!stream };
+    if (maxTok) body.max_tokens = maxTok;
+    if (stream) body.stream_options = { include_usage: true }; // OpenAI usage in final chunk
+    return JSON.stringify(body);
+  },
+
+  _captureUsage(meta, j) {
+    const u = j.usage || (j.message && j.message.usage) || (j.response && j.response.usage);
+    if (u) {
+      if (u.prompt_tokens != null) meta.inTok = u.prompt_tokens;
+      if (u.input_tokens != null) meta.inTok = u.input_tokens;
+      if (u.completion_tokens != null) meta.outTok = u.completion_tokens;
+      if (u.output_tokens != null) meta.outTok = u.output_tokens;
+    }
   },
   _extractContent(fmt, data) {
     if (fmt === "responses") { if (typeof data.output_text === "string") return data.output_text; if (Array.isArray(data.output)) return data.output.map((o) => Array.isArray(o.content) ? o.content.map((c) => c.text || "").join("") : "").join(""); return undefined; }
@@ -909,7 +1009,8 @@ AIReader = {
     return content;
   },
 
-  async callLLMStream(messages, onDelta, shouldStop) {
+  async callLLMStream(messages, onDelta, shouldStop, meta) {
+    meta = meta || {};
     const fmt = this._fmt();
     const resp = await fetch(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, true) });
     if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
@@ -917,6 +1018,7 @@ AIReader = {
       const raw = await resp.text();
       const data = this._parseOrThrow(raw);
       if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+      this._captureUsage(meta, data);
       const c = this._extractContent(fmt, data) || ""; if (c) onDelta(c); return c;
     }
     const reader = resp.body.getReader();
@@ -935,6 +1037,7 @@ AIReader = {
         if (payload === "[DONE]") continue;
         let j; try { j = JSON.parse(payload); } catch (e) { continue; }
         if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+        this._captureUsage(meta, j);
         const d = this._streamDelta(fmt, j);
         if (d) { full += d; onDelta(d); }
       }

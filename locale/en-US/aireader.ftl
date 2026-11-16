@@ -23,4 +23,5 @@ aireader-prefs-model = Model
 aireader-prefs-language = Output language
 aireader-prefs-temperature = Temperature
 aireader-prefs-maxchars = Max characters sent
+aireader-prefs-maxtokens = Max output tokens (0 = unlimited)
 aireader-prefs-test = Test connection

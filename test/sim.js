@@ -40,7 +40,8 @@ const ctx={ Zotero:{ debug:()=>{}, Prefs:{get:k=>prefs[k]}, DataDirectory:{dir:'
   Annotations:{ saveFromJSON: async (att,json)=>{ savedAnnotation={att:att.key,json}; return {key:json.key}; } },
  }, PathUtils:{join:(...a)=>a.join('/')},
  IOUtils:{async exists(){return false;},async readUTF8(){return '';},async writeUTF8(){},async makeDirectory(){}},
- fetch:fetchMock, console, setTimeout, TextDecoder, TextEncoder, Services:{scriptloader:{}} };
+ fetch:fetchMock, console, setTimeout, TextDecoder, TextEncoder, Services:{scriptloader:{}},
+ marked:require('../content/vendor/marked.min.js'), katex:require('../content/vendor/katex/katex.min.js') };
 ctx.AIReader=undefined; vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'..','content','aireader.js'),'utf8'), ctx, {filename:'aireader.js'});
 const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
@@ -75,7 +76,7 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  const bubble=stubEl();
  const b5=byId.get(5), b9=byId.get(9);
  const sample='看 [B'+b5.id+']，高亮 [[hl:'+b5.id+']] 批注 [[note:'+b9.id+'|重点]] 完';
- A.enhanceMessage(state, bubble, sample);
+ A._renderLines(state, bubble, sample);
  const refs=collect(bubble,'aireader-ref');
  const applies=collect(bubble,'aireader-apply');
  console.log('refs:',refs.length,'applies:',applies.length);
@@ -83,7 +84,7 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  assert(applies.length===2,'two apply buttons (hl+note)');
  // markdown: bold + bullet list
  const bubble2=stubEl();
- A.enhanceMessage(state, bubble2, '**结论**\n- 第一点 [B'+b5.id+']\n- 第二点');
+ A._renderLines(state, bubble2, '**结论**\n- 第一点 [B'+b5.id+']\n- 第二点');
  const uls=collect(bubble2,'aireader-md-ul');
  assert(uls.length===1 && uls[0].children.length===2,'bullet list rendered');
  console.log('markdown list items:',uls[0].children.length);
@@ -153,6 +154,18 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  prefs['aireader.apiFormat']='chat';
  console.log('API format matrix (chat/responses/anthropic): OK');
 
+ // maxTokens: unset/0 => chat uncapped, anthropic uses large fallback; >0 => applied everywhere
+ delete prefs['aireader.maxTokens'];
+ assert(JSON.parse(A._bodyFor('chat',[{role:'user',content:'U'}],true)).max_tokens===undefined,'chat uncapped when maxTokens unset');
+ assert(JSON.parse(A._bodyFor('anthropic',[{role:'user',content:'U'}],true)).max_tokens===32000,'anthropic large fallback when uncapped');
+ prefs['aireader.maxTokens']='0';
+ assert(JSON.parse(A._bodyFor('chat',[{role:'user',content:'U'}],true)).max_tokens===undefined,'chat uncapped when maxTokens=0');
+ prefs['aireader.maxTokens']='8000';
+ assert(JSON.parse(A._bodyFor('chat',[{role:'user',content:'U'}],true)).max_tokens===8000,'chat respects maxTokens>0');
+ assert(JSON.parse(A._bodyFor('anthropic',[{role:'user',content:'U'}],true)).max_tokens===8000,'anthropic respects maxTokens>0');
+ delete prefs['aireader.maxTokens'];
+ console.log('maxTokens cap behavior: OK');
+
  // _normBase: http->https for remote, keep localhost, add /v1 to bare host
  const ob=prefs['aireader.baseURL'];
  prefs['aireader.baseURL']='http://api.example.com'; assert(A._normBase()==='https://api.example.com/v1','remote http upgraded + /v1');
@@ -174,6 +187,19 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  console.log('models fetched:',models.length, models.slice(0,3).join(','));
  assert(models.includes('Opus 5.5')&&models.length===3,'fetchModels parses id list');
 
+ // markdown + KaTeX rich HTML pipeline
+ const rich=A._mathAndMarkdown('**粗** 与公式 $E=mc^2$ 和\n\n- 列表项 [B5]\n\n$$\\int_0^1 x\\,dx$$');
+ assert(/<strong>粗<\/strong>/.test(rich),'markdown bold');
+ assert(/<li>/.test(rich),'markdown list');
+ assert(/katex/.test(rich),'katex rendered math');
+ assert(/\[B5\]/.test(rich),'citation token preserved for linkify');
+ console.log('rich markdown+katex: OK');
+
+ // usage capture per format
+ (()=>{ const m={}; A._captureUsage(m,{usage:{prompt_tokens:12,completion_tokens:34}}); assert(m.inTok===12&&m.outTok===34,'openai usage'); })();
+ (()=>{ const m={}; A._captureUsage(m,{type:'message_start',message:{usage:{input_tokens:7}}}); A._captureUsage(m,{type:'message_delta',usage:{output_tokens:21}}); assert(m.inTok===7&&m.outTok===21,'anthropic usage'); })();
+ console.log('usage capture: OK');
+
  // ---- vision: message shapes per format ----
  const vm1=A.buildVisionMessages('chat','中文','desc','data:image/png;base64,AAA');
  assert(vm1[1].content[1].image_url.url==='data:image/png;base64,AAA','chat vision image_url');
@@ -184,7 +210,7 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  // fig directive → fig button
  const b3=blocks.find(b=>b.type==='image'&&b.position)||blocks.find(b=>b.position);
  const figBubble=stubEl();
- A.enhanceMessage(st, figBubble, '见这张图 [[fig:'+b3.id+']]');
+ A._renderLines(st, figBubble, '见这张图 [[fig:'+b3.id+']]');
  assert(collect(figBubble,'aireader-apply aireader-figbtn').length===1,'fig button rendered');
  console.log('fig button: OK');
 

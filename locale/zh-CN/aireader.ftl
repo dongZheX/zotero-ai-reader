@@ -23,4 +23,5 @@ aireader-prefs-model = 模型名称
 aireader-prefs-language = 输出语言
 aireader-prefs-temperature = 温度 (temperature)
 aireader-prefs-maxchars = 最大发送字符数
+aireader-prefs-maxtokens = 最大输出 token（0 = 不限制）
 aireader-prefs-test = 测试连接

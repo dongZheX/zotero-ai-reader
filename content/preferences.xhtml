@@ -58,6 +58,13 @@
     </hbox>
 
     <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-maxtokens" control="aireader-maxtokens">Max output tokens (0 = unlimited)</label>
+      <html:input id="aireader-maxtokens" type="number" size="8"
+                  preference="extensions.zotero.aireader.maxTokens"
+                  placeholder="0"/>
+    </hbox>
+
+    <hbox align="center">
       <button id="aireader-test" data-l10n-id="aireader-prefs-test" label="Test connection"/>
       <label id="aireader-test-result" style="margin-inline-start: 8px;"/>
     </hbox>

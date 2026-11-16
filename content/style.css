@@ -388,27 +388,45 @@
 .aireader-modelitem-on { color: var(--air-accent); font-weight: 600; }
 .aireader-modelitem-on::after { content: " ✓"; }
 
-/* ===== Full-height "chat view" (layout borrowed from llm-for-zotero):
-   when :root[data-air-view="chat"] is set, our section takes over the whole
-   item/context pane — native header + other sections + our collapsible head
-   are hidden and every wrapper becomes a full-height flex column. Still uses
-   only the official item-pane section API (no DOM injection). ===== */
-:root[data-air-view="chat"] .zotero-view-item-main {
-  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+/* ===== scroll containment: stop wheel/overscroll from bubbling out to the
+   window (which triggered back/forward or app-switch gestures) ===== */
+.aireader-root, .aireader-chat-msgs, .aireader-modellist, .aireader-figresult {
+  overscroll-behavior: contain;
 }
-:root[data-air-view="chat"] item-details .zotero-view-item {
-  flex: 1 1 0; min-height: 0; overflow: auto; padding: 0;
+
+/* ===== rich markdown content ===== */
+.aireader-rich > :first-child { margin-top: 0; }
+.aireader-rich > :last-child { margin-bottom: 0; }
+.aireader-rich p { margin: 0 0 7px; }
+.aireader-rich h1, .aireader-rich h2, .aireader-rich h3, .aireader-rich h4 {
+  margin: 10px 0 5px; font-weight: 650; line-height: 1.3;
 }
-:root[data-air-view="chat"] item-details .zotero-view-item::before,
-:root[data-air-view="chat"] item-details .zotero-view-item::after { display: none !important; }
-:root[data-air-view="chat"] item-details item-pane-header { display: none !important; }
-:root[data-air-view="chat"] item-details .zotero-view-item > [data-pane]:not([data-pane="ai-reader-summary"]) { display: none !important; }
-:root[data-air-view="chat"] item-pane-custom-section[data-pane="ai-reader-summary"] > collapsible-section > .head { display: none !important; }
-:root[data-air-view="chat"] item-pane-custom-section[data-pane="ai-reader-summary"],
-:root[data-air-view="chat"] item-pane-custom-section[data-pane="ai-reader-summary"] > collapsible-section,
-:root[data-air-view="chat"] item-pane-custom-section[data-pane="ai-reader-summary"] > collapsible-section > [data-type="body"] {
-  display: flex; flex-direction: column; height: 100%; min-height: 0; max-height: none;
-  margin: 0; padding: 0; box-sizing: border-box; overflow: hidden;
+.aireader-rich h1 { font-size: 15px; }
+.aireader-rich h2 { font-size: 14px; }
+.aireader-rich h3 { font-size: 13px; }
+.aireader-rich ul, .aireader-rich ol { margin: 4px 0 7px; padding-inline-start: 20px; }
+.aireader-rich li { margin: 2px 0; }
+.aireader-rich strong { font-weight: 650; }
+.aireader-rich a { color: var(--air-accent); }
+.aireader-rich code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; padding: 1px 5px; border-radius: 5px;
+  background: var(--fill-quarternary, rgba(127,127,127,0.18));
 }
-:root[data-air-view="chat"] .aireader-root { height: 100%; min-height: 0; padding: 8px 8px 6px; }
-:root[data-air-view="chat"] .aireader-chat-msgs { flex: 1 1 auto !important; height: auto !important; }
+.aireader-rich pre {
+  margin: 6px 0; padding: 9px 11px; border-radius: 8px; overflow-x: auto;
+  background: var(--fill-quarternary, rgba(127,127,127,0.14));
+}
+.aireader-rich pre code { background: none; padding: 0; font-size: 11.5px; }
+.aireader-rich blockquote {
+  margin: 6px 0; padding: 2px 10px; color: var(--air-muted);
+  border-inline-start: 3px solid var(--air-border);
+}
+.aireader-rich table { border-collapse: collapse; margin: 6px 0; font-size: 12px; display: block; overflow-x: auto; }
+.aireader-rich th, .aireader-rich td { border: 1px solid var(--air-border); padding: 4px 8px; }
+.aireader-rich th { background: var(--air-bubble); font-weight: 600; }
+.aireader-rich .katex { font-size: 1.04em; }
+.aireader-rich .katex-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
+
+/* ===== per-message token/context meta line ===== */
+.aireader-meta { margin: 3px 2px 0; font-size: 10.5px; color: var(--air-muted); }
