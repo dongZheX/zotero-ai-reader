@@ -186,8 +186,9 @@ AIReader = {
       else { this.onChatSend(body); }
     });
     composer.appendChild(input); composer.appendChild(send);
-    body.appendChild(composer);
 
+    // Footer (model switcher + clear) sits just ABOVE the composer so the input
+    // box is the bottom-most row of the panel.
     const footer = this._el(doc, "div", "aireader-footer");
     const modelPill = this._el(doc, "button", "aireader-modelpill");
     modelPill.addEventListener("click", (ev) => { ev.stopPropagation(); this.toggleModelMenu(body); });
@@ -197,6 +198,8 @@ AIReader = {
     clear.addEventListener("click", () => this.onClear(body));
     footer.appendChild(clear);
     body.appendChild(footer);
+
+    body.appendChild(composer);
 
     const preview = this._el(doc, "div", "aireader-preview");
     preview.style.display = "none";
