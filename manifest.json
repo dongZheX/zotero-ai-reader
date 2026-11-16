@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "AI Reader",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "AI-assisted paper reading: grounded chat with click-to-source citations, AI highlights/notes into the PDF, save-to-note, retrieval, and selectable API formats.",
   "author": "dongzhe05",
   "icons": {

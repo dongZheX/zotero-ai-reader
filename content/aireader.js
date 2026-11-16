@@ -11,8 +11,6 @@ AIReader = {
   _blockStore: new Map(),  // attachment.key -> blocks[]
 
   HILITE_COLOR: "#ffd400",
-  // Visible in the panel header so it's easy to confirm which build is loaded.
-  BUILD: "0.7.1",
 
   init({ id, version, rootURI }) {
     this.id = id; this.version = version; this.rootURI = rootURI;
@@ -181,10 +179,6 @@ AIReader = {
     gear.addEventListener("click", () => Zotero.Utilities.Internal.openPreferences(AIReader._prefPaneID));
     top.appendChild(noteBtn);
     top.appendChild(this._el(doc, "div", "aireader-foot-spacer"));
-    // Visible build stamp so we can confirm which build is actually loaded.
-    const stamp = this._el(doc, "div", "aireader-build", this.BUILD || "");
-    stamp.title = "构建标记（用于确认安装的是哪一版）";
-    top.appendChild(stamp);
     top.appendChild(gear);
     body.appendChild(top);
 
