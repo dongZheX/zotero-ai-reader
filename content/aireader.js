@@ -90,14 +90,15 @@ AIReader = {
       if (!text) return;
       if (!this.getPref("apiKey")) return;
       const lang = this.getPref("language") || "中文";
-      append({ label: "在右侧问 AI", onCommand: () => this.askFromSelection(reader, text) });
+      // 问 AI = 把选中原文作为引用填进右侧输入框，自己接着提问
+      append({ label: "在右侧问 AI（引用到输入框）", onCommand: () => this.quoteSelection(reader, text) });
+      // 解释 = 直接发一条「解释这段」的消息并得到带出处的回答
       append({
-        label: "AI 解释", onCommand: async () => {
-          try { await this.askFromSelection(reader, "请解释这段原文：\n“" + text + "”"); } catch (e) {}
-        },
+        label: "AI 解释", onCommand: () => this.askFromSelection(reader, "请结合上下文解释这段原文，并指出它在论文中的作用：\n“" + text + "”", text),
       });
+      // 翻译 = 只翻译，不解释
       append({
-        label: "AI 翻译", onCommand: () => this.askFromSelection(reader, "请把这段原文翻译成" + lang + "：\n“" + text + "”"),
+        label: "AI 翻译", onCommand: () => this.askFromSelection(reader, "请把下面这段原文翻译成" + lang + "，只输出译文，不要解释：\n“" + text + "”", text),
       });
     } catch (e) { this.log("ctxmenu error: " + e); }
   },
@@ -208,6 +209,30 @@ AIReader = {
     };
     this._bodyState.set(body, state);
     this.updateModelPill(state);
+
+    // Scroll containment: trap wheel inside the AI Reader panel so it never
+    // chains to the surrounding item pane (which would jump to other sections).
+    // We route the wheel to the innermost scrollable child under the cursor
+    // (messages list, model menu, textarea) and always preventDefault so the
+    // event cannot reach the item pane, regardless of where in the panel it is.
+    const win = doc.defaultView;
+    body.addEventListener("wheel", (ev) => {
+      let el = ev.target;
+      let scroller = null;
+      while (el && el !== body && el.nodeType === 1) {
+        if (el.scrollHeight > el.clientHeight) {
+          const oy = win.getComputedStyle(el).overflowY;
+          if (oy === "auto" || oy === "scroll") { scroller = el; break; }
+        }
+        el = el.parentNode;
+      }
+      if (!scroller) scroller = state.chatMsgs;
+      // Normalize delta: 0=pixel, 1=line (~16px), 2=page.
+      const unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? scroller.clientHeight : 1;
+      scroller.scrollTop += ev.deltaY * unit;
+      ev.preventDefault();
+    }, { passive: false });
+
     // Safety: clear any stale full-height attribute from older versions so the
     // panel can never get stranded blank.
     try { state.doc.documentElement.removeAttribute("data-air-view"); } catch (e) {}
@@ -1066,10 +1091,10 @@ AIReader = {
       const lang = this.getPref("language") || "中文";
 
       append(mkBtn("问 AI", () => {
-        this.askFromSelection(reader, text);
+        this.quoteSelection(reader, text);
         result.style.display = "block";
         result.style.color = "#3b7ddd";
-        result.textContent = "已发送到侧栏对话 →";
+        result.textContent = "已引用到右侧输入框 →";
       }));
       append(mkBtn("AI 解释", showInline(() => this.callLLM([{ role: "system", content: "You explain excerpts from academic papers clearly and concisely in " + lang + ". 2-4 sentences." }, { role: "user", content: "Explain this passage:\n\n" + text }]))));
       append(mkBtn("翻译", showInline(() => this.callLLM([{ role: "system", content: "You are a professional translator. Translate into " + lang + ". Output only the translation." }, { role: "user", content: text }]))));
@@ -1077,10 +1102,35 @@ AIReader = {
     } catch (e) { this.log("popup error: " + e); }
   },
 
+  // Put the selection into the sidebar input as a quote and let the user type
+  // their own question ("问 AI" / "在右侧问 AI"). Falls back to sending a
+  // grounded explain if no live panel is available.
+  quoteSelection(reader, text) {
+    try {
+      const att = Zotero.Items.get(reader.itemID); const key = att && att.key;
+      const state = key && this._panels.get(key);
+      if (state && state.input && state.attachment && state.attachment.key === key) {
+        const q = "关于这段原文：\n“" + text + "”\n\n我的问题是：";
+        state.input.value = q;
+        try {
+          state.input.style.height = "auto";
+          state.input.style.height = Math.min(140, state.input.scrollHeight) + "px";
+          state.input.focus();
+          state.input.setSelectionRange(q.length, q.length);
+        } catch (e) {}
+        return;
+      }
+    } catch (e) { this.log("quoteSelection error: " + e); }
+    // No live panel → send a grounded explain so the user still gets an answer.
+    this.askFromSelection(reader, "请结合上下文解释这段原文，并指出它在论文中的作用：\n“" + text + "”", text);
+  },
+
   // Route a reader selection into the sidebar chat (live panel if present,
   // else run headless and store so it appears when the panel opens).
-  async askFromSelection(reader, text) {
-    const q = "请解释这段原文，并指出它在论文中的作用：\n“" + text + "”";
+  // `message` is sent verbatim; `anchor` (raw selection) drives retrieval.
+  async askFromSelection(reader, message, anchor) {
+    const q = message;
+    const sel = anchor || message;
     let key = null;
     try { const att = Zotero.Items.get(reader.itemID); key = att && att.key; } catch (e) {}
     const state = key && this._panels.get(key);
@@ -1092,7 +1142,7 @@ AIReader = {
       if (!blocks) { blocks = await this.extractBlocks(att.id); if (blocks) this._blockStore.set(key, blocks); }
       let hist = this._chatStore.get(key); if (!hist) { hist = (await this.loadChat(att)) || []; this._chatStore.set(key, hist); }
       hist.push({ role: "user", content: q });
-      const ctx = blocks ? this.buildRetrievedContext(blocks, text) : "";
+      const ctx = blocks ? this.buildRetrievedContext(blocks, sel) : "";
       const messages = [{ role: "system", content: this.systemPrompt(ctx) }, ...hist.slice(-12)];
       const ans = await this.callLLM(messages);
       hist.push({ role: "assistant", content: ans });
