@@ -14,11 +14,10 @@
   color: var(--fill-primary, inherit);
   position: relative;
   box-sizing: border-box;
-  /* Fixed-height column so the composer can pin to the bottom and the messages
-     area grows to fill the space between. Zotero gives plugins only an
-     item-pane section, so we size to the viewport and scroll inside. */
-  height: clamp(360px, 80vh, 900px);
-  overflow: hidden;
+  /* Auto height: the item-pane section sizes to its content, so we must NOT
+     force a fixed height (that leaves dead space below the composer when the
+     pane is taller). The messages area is bounded below; everything else
+     stacks compactly with the composer as the last row. */
 }
 
 /* kill native OS button chrome everywhere in the panel */
@@ -124,9 +123,9 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* Grow to fill the space between the header and the pinned composer. */
-  flex: 1 1 auto;
-  min-height: 120px;
+  /* Bounded, self-contained chat card. Scrolls inside; the composer sits
+     directly below it so there is never a dead gap. */
+  height: clamp(240px, 52vh, 640px);
   overflow-y: auto;
   padding: 4px 2px;
   scrollbar-width: thin;
