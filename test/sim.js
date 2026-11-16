@@ -28,7 +28,8 @@ function stubEl(){ const e={children:[],className:'',style:{},dataset:{},_text:'
   set textContent(v){ e._text=v; if(v==='')e.children=[]; }, get textContent(){return e._text;} };
   return e; }
 function collect(node, cls, acc){ acc=acc||[]; for(const c of (node.children||[])){ if(c && c.className===cls) acc.push(c); collect(c,cls,acc);} return acc; }
-const doc={ createElement:()=>stubEl(), createElementNS:()=>stubEl(), createTextNode:(t)=>({text:t}),
+const doc={ createElement:(t)=>{const e=stubEl(); e.namespaceURI=null; e.tagName=t; return e;},
+  createElementNS:(ns,t)=>{const e=stubEl(); e.namespaceURI=ns; e.tagName=t; return e;}, createTextNode:(t)=>({text:t}),
   getElementById:()=>null, head:stubEl(), documentElement:stubEl() };
 
 const ctx={ Zotero:{ debug:()=>{}, Prefs:{get:k=>prefs[k]}, DataDirectory:{dir:'/tmp/x'},
@@ -89,6 +90,17 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  assert(uls.length===1 && uls[0].children.length===2,'bullet list rendered');
  console.log('markdown list items:',uls[0].children.length);
 
+ // GFM table rendered by the fallback line renderer (no marked needed)
+ { const tb=stubEl();
+   A._renderLines(state, tb, '结果如下：\n| 放置 | Avg |\n|---|---|\n| 每层 | 39.4 |\n| 第1-8层 | 45.0 |');
+   const tables=collect(tb,'aireader-md-table');
+   assert(tables.length===1,'one table rendered from pipe markdown');
+   const cnt=(node,tag,acc=[])=>{for(const c of (node.children||[])){if(c&&c.tagName===tag)acc.push(c);cnt(c,tag,acc);}return acc;};
+   assert(cnt(tables[0],'th').length===2,'table has 2 header cells');
+   assert(cnt(tables[0],'td').length===4,'table has 4 body cells');
+   console.log('table fallback render: OK');
+ }
+
  // streaming end-to-end via onChatSend
  const body={}; const st={ item:null, attachment:{id:7,key:'K2',libraryID:1}, blocks, doc, body:null,
    status:stubEl(), chatMsgs:stubEl(), input:{value:''}, send:stubEl(), modelPill:stubEl(), preview:stubEl(),
@@ -100,6 +112,14 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  assert(lastBody&&lastBody.stream===true,'chat streams');
  console.log('history after send:',hist.length,'| assistant has directives:',/\[\[hl:/.test(hist[1].content));
  assert(hist.length===2 && hist[0].role==='user' && hist[1].role==='assistant','history recorded');
+
+ // removeAnnotation (toggle-off): erases via eraseTx, else Items.erase(id)
+ { let erased=false; await A.removeAnnotation({eraseTx:async()=>{erased=true;}}); assert(erased,'removeAnnotation uses eraseTx');
+   let byId=0; const savedErase=ctx.Zotero.Items.erase; ctx.Zotero.Items.erase=async(id)=>{byId=id;};
+   await A.removeAnnotation({id:77}); ctx.Zotero.Items.erase=savedErase;
+   assert(byId===77,'removeAnnotation falls back to Items.erase(id)');
+   console.log('removeAnnotation toggle-off: OK');
+ }
 
  // retrieval context (TF-IDF): returns block-tagged text relevant to query
  const rc=A.buildRetrievedContext(blocks, 'vision encoder pretraining');
@@ -186,6 +206,31 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  const models=await A.fetchModels();
  console.log('models fetched:',models.length, models.slice(0,3).join(','));
  assert(models.includes('Opus 5.5')&&models.length===3,'fetchModels parses id list');
+
+ // XHTML namespace: _el MUST create HTML elements (XUL createElement renders
+ // text with a fallback font → "乱码" in the Zotero 7 main window).
+ { const XHTML='http://www.w3.org/1999/xhtml';
+   assert(A._el(doc,'div').namespaceURI===XHTML,'_el creates XHTML div (not XUL)');
+   assert(A._el(doc,'button').namespaceURI===XHTML,'_el creates XHTML button');
+   console.log('XHTML namespace for _el: OK');
+ }
+
+ // model menu legibility: items MUST get explicit inline colour + font so they
+ // stay readable even when the reader panel inherits an icon font / undefined
+ // --fill-primary (the "乱码" bug).
+ { const C=A._menuColors(doc);
+   assert(/^#[0-9a-f]{6}$/i.test(C.fg)&&/^#[0-9a-f]{6}$/i.test(C.bg),'_menuColors returns hex fg/bg');
+   const wrap=stubEl(); const st2={doc,attachment:{key:'K2'},modelPill:stubEl()}; st2.modelList=['gpt-4o-mini','claude-opus-5-5'];
+   await A.populateModels(st2, wrap);
+   assert(wrap.children.length===2,'two model items rendered');
+   const cs=wrap.children[0].style.cssText||'';
+   assert(/font-family:/.test(cs),'model item has explicit font-family inline');
+   assert(/color:#[0-9a-f]{6}/i.test(cs),'model item has explicit hex colour inline (not a var)');
+   assert(!/var\(/.test(cs),'model item colour/font must not depend on CSS vars');
+   assert(/flex:0 0 auto/.test(cs),'model item must not shrink (flex:0 0 auto) — else rows clip to a sliver');
+   assert(/line-height:/.test(cs),'model item has explicit line-height');
+   console.log('model menu inline styling: OK ('+C.fg+' on '+C.bg+', no-shrink)');
+ }
 
  // markdown + KaTeX rich HTML pipeline
  const rich=A._mathAndMarkdown('**粗** 与公式 $E=mc^2$ 和\n\n- 列表项 [B5]\n\n$$\\int_0^1 x\\,dx$$');

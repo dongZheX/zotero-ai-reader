@@ -11,6 +11,8 @@ AIReader = {
   _blockStore: new Map(),  // attachment.key -> blocks[]
 
   HILITE_COLOR: "#ffd400",
+  // Visible in the panel header so it's easy to confirm which build is loaded.
+  BUILD: "v0.7.0",
 
   init({ id, version, rootURI }) {
     this.id = id; this.version = version; this.rootURI = rootURI;
@@ -128,11 +130,30 @@ AIReader = {
       (doc.head || doc.documentElement).appendChild(link);
     };
     add("aireader-katex", this.rootURI + "content/vendor/katex/katex.min.css");
-    add("aireader-style", this.rootURI + "content/style.css");
+    // Cache-bust so a reinstall/restart always loads the current stylesheet
+    // (Gecko aggressively caches file:// resources by URL).
+    add("aireader-style", this.rootURI + "content/style.css?v=" + (this.version || "") + "-" + Date.now());
   },
 
+  // Theme-aware, explicit colours so the popup menu is legible even when
+  // Zotero's CSS custom props (--fill-primary, etc.) are undefined in the
+  // reader panel. Returns hardcoded hex values, never a var().
+  _menuColors(doc) {
+    let dark = false;
+    try { dark = !!(doc.defaultView && doc.defaultView.matchMedia("(prefers-color-scheme: dark)").matches); } catch (e) {}
+    return dark
+      ? { fg: "#e6edf3", muted: "#9aa6bb", bg: "#22272e", border: "#3a434f", hover: "rgba(255,255,255,.08)", accent: "#5a9bff" }
+      : { fg: "#1a1d21", muted: "#6b7280", bg: "#ffffff", border: "#d7dbe0", hover: "rgba(59,125,221,.12)", accent: "#3b7ddd" };
+  },
+
+  _UIFONT: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Helvetica, Arial, sans-serif',
+
+  // Zotero's main window is a XUL document, so a bare doc.createElement("div")
+  // produces a XUL element whose text content renders with a fallback/symbol
+  // font ("乱码"). HTML elements must be created in the XHTML namespace.
+  // (Same thing zotero-plugin-toolkit's createElement does.)
   _el(doc, tag, cls, text) {
-    const e = doc.createElement(tag);
+    const e = doc.createElementNS("http://www.w3.org/1999/xhtml", tag);
     if (cls) e.className = cls;
     if (text != null) e.textContent = text;
     return e;
@@ -140,7 +161,11 @@ AIReader = {
 
   renderSkeleton(body, item, doc) {
     const old = this._bodyState.get(body);
-    if (old) this.closeModelMenu(old);
+    if (old) {
+      this.closeModelMenu(old);
+      if (old._ro) { try { old._ro.disconnect(); } catch (e) {} old._ro = null; }
+      if (old._onWinResize) { try { old.doc.defaultView.removeEventListener("resize", old._onWinResize); } catch (e) {} old._onWinResize = null; }
+    }
     this.injectCSS(doc);
     body.textContent = "";
     body.classList.add("aireader-root");
@@ -154,6 +179,10 @@ AIReader = {
     gear.addEventListener("click", () => Zotero.Utilities.Internal.openPreferences(AIReader._prefPaneID));
     top.appendChild(noteBtn);
     top.appendChild(this._el(doc, "div", "aireader-foot-spacer"));
+    // Visible build stamp so we can confirm which build is actually loaded.
+    const stamp = this._el(doc, "div", "aireader-build", this.BUILD || "");
+    stamp.title = "构建标记（用于确认安装的是哪一版）";
+    top.appendChild(stamp);
     top.appendChild(gear);
     body.appendChild(top);
 
@@ -213,37 +242,34 @@ AIReader = {
     this._bodyState.set(body, state);
     this.updateModelPill(state);
 
-    // Scroll containment: trap wheel inside the AI Reader panel so it never
-    // chains to the surrounding item pane (which would jump to other sections).
-    // We route the wheel to the innermost scrollable child under the cursor
-    // (messages list, model menu, textarea) and always preventDefault so the
-    // event cannot reach the item pane, regardless of where in the panel it is.
+    // Scroll containment (lightweight): let the messages area and any scrollable
+    // child scroll NATIVELY — overscroll-behavior:contain (CSS) stops the scroll
+    // from chaining out to the window when it reaches a boundary. We only
+    // preventDefault wheel over NON-scrollable regions (top bar, chips, empty
+    // space) so those don't chain to the window/other apps. Doing it this way
+    // keeps normal scroll-up-to-history working (a full manual trap broke it).
     const win = doc.defaultView;
     body.addEventListener("wheel", (ev) => {
       let el = ev.target;
-      let scroller = null;
       while (el && el !== body && el.nodeType === 1) {
-        if (el.scrollHeight > el.clientHeight) {
-          const oy = win.getComputedStyle(el).overflowY;
-          if (oy === "auto" || oy === "scroll") { scroller = el; break; }
+        if (el.scrollHeight - el.clientHeight > 1) {
+          let oy = ""; try { oy = win.getComputedStyle(el).overflowY; } catch (e) {}
+          if (oy === "auto" || oy === "scroll") return; // native scroll handles it
         }
         el = el.parentNode;
       }
-      if (!scroller) scroller = state.chatMsgs;
-      // Normalize delta: 0=pixel, 1=line (~16px), 2=page.
-      const unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? scroller.clientHeight : 1;
-      scroller.scrollTop += ev.deltaY * unit;
-      ev.preventDefault();
+      ev.preventDefault(); // over a non-scrollable area → don't chain out
     }, { passive: false });
+
+    // (Height is handled purely in CSS — see .aireader-chat-msgs. A JS
+    // measure/resize approach proved unreliable in the reader's document
+    // context and collapsed the panel, so it was removed.)
 
     // Safety: clear any stale full-height attribute from older versions so the
     // panel can never get stranded blank.
     try { state.doc.documentElement.removeAttribute("data-air-view"); } catch (e) {}
   },
 
-  // Make the chat area fill the actual available height of the item/context
-  // pane and track window/pane/section size changes (Zotero has no standalone
-  // sidebar, so we measure and resize ourselves).
   setComposerEnabled(state, on) {
     if (state.input) state.input.disabled = !on;
     if (state.send) state.send.disabled = !on;
@@ -265,16 +291,22 @@ AIReader = {
     if (!state) return;
     if (state.modelMenu) { this.closeModelMenu(state); return; }
     const doc = state.doc;
+    const C = this._menuColors(doc);
     const menu = this._el(doc, "div", "aireader-modelmenu");
+    // Inline styling wins over any stale/undefined CSS and guarantees legibility.
+    menu.style.cssText += ";background:" + C.bg + ";color:" + C.fg + ";border:1px solid " + C.border + ";font-family:" + this._UIFONT + ";";
     const fmtRow = this._el(doc, "div", "aireader-fmtrow");
     const cur = this._fmt();
     for (const [val, lbl] of [["chat", "chat"], ["responses", "responses"], ["anthropic", "claude"]]) {
-      const b = this._el(doc, "button", "aireader-fmt" + (cur === val ? " aireader-fmt-on" : ""), lbl);
+      const on = cur === val;
+      const b = this._el(doc, "button", "aireader-fmt" + (on ? " aireader-fmt-on" : ""), lbl);
+      b.style.cssText += ";font-family:" + this._UIFONT + ";color:" + (on ? "#fff" : C.fg) + ";background:" + (on ? C.accent : "transparent") + ";border:1px solid " + (on ? "transparent" : C.border) + ";";
       b.addEventListener("click", (ev) => { ev.stopPropagation(); Zotero.Prefs.set("aireader.apiFormat", val); this.updateModelPill(state); this.closeModelMenu(state); this.toggleModelMenu(body); });
       fmtRow.appendChild(b);
     }
     menu.appendChild(fmtRow);
     const listWrap = this._el(doc, "div", "aireader-modellist");
+    listWrap.style.color = C.fg;
     menu.appendChild(listWrap);
     state.modelMenu = menu;
     body.appendChild(menu);
@@ -290,22 +322,31 @@ AIReader = {
   },
 
   async populateModels(state, wrap) {
+    const C = this._menuColors(state.doc);
     const render = (ids) => {
       const cur = this.getPref("model");
       wrap.textContent = "";
       for (const id of ids) {
-        const it = this._el(state.doc, "div", "aireader-modelitem" + (id === cur ? " aireader-modelitem-on" : ""), id);
+        const on = id === cur;
+        const it = this._el(state.doc, "div", "aireader-modelitem" + (on ? " aireader-modelitem-on" : ""), id);
+        // Explicit colour + font so model names are legible, and flex:0 0 auto
+        // + line-height so the flex column (fixed max-height, many items) does
+        // NOT crush each row to a clipped sliver.
+        it.style.cssText += ";color:" + (on ? C.accent : C.fg) + ";font-family:" + this._UIFONT + ";font-size:12px;line-height:1.6;flex:0 0 auto;" + (on ? "font-weight:600;" : "");
+        it.addEventListener("mouseenter", () => { it.style.background = C.hover; });
+        it.addEventListener("mouseleave", () => { it.style.background = "transparent"; });
         it.addEventListener("click", (ev) => { ev.stopPropagation(); Zotero.Prefs.set("aireader.model", id); this.updateModelPill(state); this.closeModelMenu(state); });
         wrap.appendChild(it);
       }
     };
+    const msg = (t) => { wrap.textContent = t; wrap.style.cssText += ";color:" + C.muted + ";font-family:" + this._UIFONT + ";padding:6px 9px;"; };
     if (state.modelList) { render(state.modelList); return; }
-    wrap.textContent = "加载模型中…";
+    msg("加载模型中…");
     try {
       const ids = await this.fetchModels();
       state.modelList = ids;
-      if (ids.length) render(ids); else wrap.textContent = "未获取到模型列表";
-    } catch (e) { wrap.textContent = "加载失败: " + (e.message || e); }
+      if (ids.length) render(ids); else msg("未获取到模型列表");
+    } catch (e) { msg("加载失败: " + (e.message || e)); }
   },
 
   async fetchModels() {
@@ -661,7 +702,7 @@ AIReader = {
   renderRich(state, bubble, text) {
     const doc = state.doc;
     const html = this._mathAndMarkdown(text);
-    const tmp = doc.createElement("div");
+    const tmp = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
     tmp.innerHTML = html;
     this._sanitize(tmp);
     bubble.textContent = "";
@@ -701,17 +742,52 @@ AIReader = {
   },
 
   // --- fallback line renderer (no libs) ---
+  _isTableRow(s) { return /^\s*\|.*\|\s*$/.test(s); },
+  _isTableDelim(s) { return /\|/.test(s) && /^\s*\|?[\s:|-]+\|?\s*$/.test(s) && /-/.test(s); },
+  _splitRow(s) {
+    let t = s.trim();
+    if (t.startsWith("|")) t = t.slice(1);
+    if (t.endsWith("|")) t = t.slice(0, -1);
+    return t.split("|").map((c) => c.trim());
+  },
+  _renderTable(state, bubble, headerLine, bodyLines) {
+    const doc = state.doc;
+    const wrap = this._el(doc, "div", "aireader-tablewrap");
+    const table = this._el(doc, "table", "aireader-md-table");
+    const thead = this._el(doc, "thead");
+    const htr = this._el(doc, "tr");
+    for (const c of this._splitRow(headerLine)) { const th = this._el(doc, "th"); this.renderInline(state, th, c); htr.appendChild(th); }
+    thead.appendChild(htr); table.appendChild(thead);
+    const tbody = this._el(doc, "tbody");
+    for (const bl of bodyLines) {
+      const tr = this._el(doc, "tr");
+      for (const c of this._splitRow(bl)) { const td = this._el(doc, "td"); this.renderInline(state, td, c); tr.appendChild(td); }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody); wrap.appendChild(table); bubble.appendChild(wrap);
+  },
   _renderLines(state, bubble, text) {
     const doc = state.doc;
     bubble.textContent = "";
     const lines = (text || "").split(/\r?\n/);
     let ul = null;
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const trimmed = line.trim();
+      // GFM table block: header row, delimiter row, then body rows.
+      if (this._isTableRow(trimmed) && i + 1 < lines.length && this._isTableDelim(lines[i + 1].trim())) {
+        ul = null;
+        const body = [];
+        let j = i + 2;
+        while (j < lines.length && this._isTableRow(lines[j].trim())) { body.push(lines[j].trim()); j++; }
+        this._renderTable(state, bubble, trimmed, body);
+        i = j - 1;
+        continue;
+      }
       const isBullet = /^[-*•]\s+/.test(trimmed) || /^\d+[.)]\s+/.test(trimmed);
       if (isBullet) {
         if (!ul) { ul = this._el(doc, "ul", "aireader-md-ul"); bubble.appendChild(ul); }
-        const li = doc.createElement("li");
+        const li = this._el(doc, "li");
         this.renderInline(state, li, trimmed.replace(/^([-*•]|\d+[.)])\s+/, ""));
         ul.appendChild(li);
       } else {
@@ -773,17 +849,46 @@ AIReader = {
 
   makeApplyButton(state, block, kind, comment) {
     const doc = state.doc;
-    const label = (kind === "note" ? "✎ 应用批注 p" : "✎ 应用划线 p") + block.pageLabel;
-    const btn = this._el(doc, "a", "aireader-apply", label);
+    const baseLabel = (kind === "note" ? "✎ 应用批注 p" : "✎ 应用划线 p") + block.pageLabel;
+    const btn = this._el(doc, "a", "aireader-apply", baseLabel);
     btn.title = block.text.slice(0, 160);
     btn.addEventListener("click", async (ev) => {
       ev.preventDefault();
-      if (btn._done) { AIReader.navigateTo(state.attachment.id, block); return; }
-      btn.textContent = "…";
-      try { await AIReader.applyAnnotation(state.attachment, block, { type: "highlight", comment }); btn._done = true; btn.classList.add("aireader-apply-done"); btn.textContent = "✓ 已标注 p" + block.pageLabel; }
-      catch (e) { btn.textContent = "✗ " + (e.message || "失败"); AIReader.log("applyAnnotation error: " + e); }
+      if (btn._busy) return;
+      btn._busy = true;
+      try {
+        if (btn._ann) {
+          // Toggle off: remove the annotation we created.
+          btn.textContent = "…";
+          await AIReader.removeAnnotation(btn._ann);
+          btn._ann = null;
+          btn.classList.remove("aireader-apply-done");
+          btn.textContent = baseLabel;
+        } else {
+          btn.textContent = "…";
+          const ann = await AIReader.applyAnnotation(state.attachment, block, { type: "highlight", comment });
+          btn._ann = ann || true;
+          btn.classList.add("aireader-apply-done");
+          btn.textContent = "✓ 已标注 p" + block.pageLabel + " · 重复点击取消";
+        }
+      } catch (e) {
+        btn.textContent = "✗ " + (e.message || "失败");
+        AIReader.log("apply/remove annotation error: " + e);
+      } finally { btn._busy = false; }
     });
     return btn;
+  },
+
+  // Delete an annotation created by the apply button (toggle-off).
+  async removeAnnotation(ann) {
+    if (!ann || ann === true) return;
+    if (typeof ann.eraseTx === "function") { await ann.eraseTx(); return; }
+    if (ann.id != null && Zotero.Items && typeof Zotero.Items.erase === "function") { await Zotero.Items.erase(ann.id); return; }
+    if (ann.key && ann.libraryID && Zotero.Items && typeof Zotero.Items.getByLibraryAndKey === "function") {
+      const it = Zotero.Items.getByLibraryAndKey(ann.libraryID, ann.key);
+      if (it && typeof it.eraseTx === "function") { await it.eraseTx(); return; }
+    }
+    throw new Error("无法取消该标注");
   },
 
   makeFigButton(state, block) {
@@ -1081,27 +1186,54 @@ AIReader = {
       if (!text || !text.trim()) return;
       if (!this.getPref("apiKey")) return;
 
-      const result = doc.createElement("div");
-      result.style.cssText = "display:none;margin-top:4px;max-width:340px;font-size:12px;line-height:1.5;white-space:pre-wrap;";
-      const mkBtn = (label, run) => {
-        const b = doc.createElement("div");
+      const win = doc.defaultView;
+      const mq = (q) => { try { return !!(win && win.matchMedia(q).matches); } catch (e) { return false; } };
+      const dark = mq("(prefers-color-scheme: dark)");
+      const reduceT = mq("(prefers-reduced-transparency: reduce)");
+      // Apple HIG "Liquid Glass" popover (webview approximation): translucent
+      // blurred fill, hairline border, soft shadow; monochrome labels with a
+      // single accent primary action; system-blue selection highlight.
+      const fg = dark ? "#f5f5f7" : "#1d1d1f";
+      const accent = dark ? "#0a84ff" : "#007aff";
+      const border = dark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.08)";
+      const glass = (dark ? "rgba(44,46,51," : "rgba(250,250,252,") + (reduceT ? "1)" : "0.72)");
+      const filter = reduceT ? "none" : "blur(24px) saturate(1.4)";
+
+      const wrap = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      wrap.style.cssText =
+        "min-width:180px;max-width:340px;margin-top:6px;padding:5px;border-radius:13px;background:" + glass +
+        ";-webkit-backdrop-filter:" + filter + ";backdrop-filter:" + filter +
+        ";border:0.5px solid " + border + ";box-shadow:0 10px 34px rgba(0,0,0,0.22),0 1px 2px rgba(0,0,0,0.12)" +
+        ";font-family:" + this._UIFONT + ";color:" + fg + ";";
+      const mkSep = () => { const s = doc.createElementNS("http://www.w3.org/1999/xhtml", "div"); s.style.cssText = "height:0;border-top:0.5px solid " + border + ";margin:4px 8px;"; return s; };
+
+      const result = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      result.style.cssText = "display:none;margin:5px 7px 3px;padding-top:7px;border-top:0.5px solid " + border +
+        ";max-width:320px;font-size:12px;line-height:1.5;white-space:pre-wrap;color:" + fg + ";";
+
+      const mkItem = (label, primary, run) => {
+        const b = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
         b.textContent = label;
-        b.style.cssText = "cursor:pointer;padding:4px 8px;margin-top:4px;border-radius:5px;background:#3b7ddd;color:#fff;text-align:center;font-size:12px;";
+        const base = "display:flex;align-items:center;cursor:pointer;padding:7px 12px;border-radius:8px;font-size:13px;line-height:1.25;white-space:nowrap;min-height:24px;transition:background .08s;color:" + (primary ? accent : fg) + ";font-weight:" + (primary ? "600" : "450") + ";";
+        b.style.cssText = base;
+        b.addEventListener("mouseenter", () => { b.style.background = accent; b.style.color = "#fff"; });
+        b.addEventListener("mouseleave", () => { b.style.background = "transparent"; b.style.color = primary ? accent : fg; });
         b.addEventListener("click", run);
         return b;
       };
-      const showInline = (run) => async () => { result.style.display = "block"; result.textContent = "…"; try { result.textContent = (await run()).trim(); } catch (e) { result.textContent = "Error: " + e.message; } };
+      const showInline = (run) => async () => { result.style.display = "block"; result.textContent = "…"; try { result.textContent = (await run()).trim(); } catch (e) { result.textContent = "出错：" + e.message; } };
       const lang = this.getPref("language") || "中文";
 
-      append(mkBtn("问 AI", () => {
+      wrap.appendChild(mkItem("问 AI（引用到侧栏）", true, () => {
         this.quoteSelection(reader, text);
-        result.style.display = "block";
-        result.style.color = "#3b7ddd";
+        result.style.display = "block"; result.style.color = accent;
         result.textContent = "已引用到右侧输入框 →";
       }));
-      append(mkBtn("AI 解释", showInline(() => this.callLLM([{ role: "system", content: "You explain excerpts from academic papers clearly and concisely in " + lang + ". 2-4 sentences." }, { role: "user", content: "Explain this passage:\n\n" + text }]))));
-      append(mkBtn("翻译", showInline(() => this.callLLM([{ role: "system", content: "You are a professional translator. Translate into " + lang + ". Output only the translation." }, { role: "user", content: text }]))));
-      append(result);
+      wrap.appendChild(mkSep());
+      wrap.appendChild(mkItem("AI 解释", false, showInline(() => this.callLLM([{ role: "system", content: "You explain excerpts from academic papers clearly and concisely in " + lang + ". 2-4 sentences." }, { role: "user", content: "Explain this passage:\n\n" + text }]))));
+      wrap.appendChild(mkItem("翻译", false, showInline(() => this.callLLM([{ role: "system", content: "You are a professional translator. Translate into " + lang + ". Output only the translation." }, { role: "user", content: text }]))));
+      wrap.appendChild(result);
+      append(wrap);
     } catch (e) { this.log("popup error: " + e); }
   },
 

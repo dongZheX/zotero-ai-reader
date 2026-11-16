@@ -14,8 +14,6 @@
   <img alt="built-with" src="https://img.shields.io/badge/built%20with-Claude%20Opus%205.5-d97757?style=flat-square"/>
 </p>
 
-<sub>对标 <a href="https://www.themoonlight.io/zh">Moonlight</a> 的阅读体验 · 直接长在 Zotero 条目面板里 · 无需第二个 App</sub>
-
 </div>
 
 ---

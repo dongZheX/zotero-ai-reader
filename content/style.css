@@ -14,10 +14,9 @@
   color: var(--fill-primary, inherit);
   position: relative;
   box-sizing: border-box;
-  /* Auto height: the item-pane section sizes to its content, so we must NOT
-     force a fixed height (that leaves dead space below the composer when the
-     pane is taller). The messages area is bounded below; everything else
-     stacks compactly with the composer as the last row. */
+  /* Auto height (content-driven). The messages area is the scroller and JS
+     sizes it to fill down to the window bottom so the composer sits at the
+     bottom with no dead space. */
 }
 
 /* kill native OS button chrome everywhere in the panel */
@@ -32,6 +31,7 @@
 
 /* ---- top row (save-note + settings) ---- */
 .aireader-top { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.aireader-build { font-size: 9.5px; color: var(--air-muted); opacity: .7; user-select: text; }
 .aireader-top-btn {
   font-size: 11.5px;
   padding: 3px 10px;
@@ -123,10 +123,14 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* Bounded, self-contained chat card. Scrolls inside; the composer sits
-     directly below it so there is never a dead gap. */
-  height: clamp(240px, 52vh, 640px);
+  /* The only scroller in the panel; pure-CSS height (a JS measure/resize proved
+     unreliable in the reader document and collapsed the panel). Tracks the
+     window height within a sensible range. overscroll-behavior:contain stops
+     the wheel chaining out to the pane/window at top/bottom (no jumping to
+     other sections or other apps). */
+  height: clamp(240px, 72vh, 1100px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px 2px;
   scrollbar-width: thin;
 }
@@ -140,7 +144,9 @@
 
 .aireader-msg { display: flex; }
 .aireader-msg-user { justify-content: flex-end; }
-.aireader-msg-assistant { justify-content: flex-start; }
+/* Assistant: stack bubble → actions → meta vertically (not squished to the
+   right of the bubble, which made "复制"/"重新生成" wrap one char per line). */
+.aireader-msg-assistant { flex-direction: column; align-items: flex-start; }
 
 .aireader-bubble {
   max-width: 92%;
@@ -348,7 +354,8 @@
   right: 4px;
   bottom: 40px;
   z-index: 20;
-  background: var(--air-surface);
+  background: var(--air-surface, Canvas);
+  color: var(--fill-primary, CanvasText);
   border: 1px solid var(--air-border);
   border-radius: 12px;
   box-shadow: 0 8px 28px rgba(0,0,0,.22);
@@ -356,6 +363,14 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+/* Force a normal text font inside the menu: in the reader panel the inherited
+   font can be a Zotero icon font, which turns model-name text into garbage
+   glyphs ("乱码"). Pin an explicit UI font stack on every descendant. */
+.aireader-modelmenu,
+.aireader-modelmenu * {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", Helvetica, Arial, sans-serif;
 }
 .aireader-fmtrow { display: flex; gap: 6px; }
 .aireader-fmt {
@@ -377,13 +392,15 @@
   flex-direction: column;
   gap: 1px;
   font-size: 12px;
-  color: var(--air-muted);
+  color: inherit;
 }
 .aireader-modelitem {
+  flex: 0 0 auto;        /* never shrink: a crushed item clips text to a sliver */
+  line-height: 1.6;
   padding: 6px 9px;
   border-radius: 7px;
   cursor: pointer;
-  color: var(--fill-primary, inherit);
+  color: var(--fill-primary, CanvasText);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -429,6 +446,12 @@
 .aireader-rich table { border-collapse: collapse; margin: 6px 0; font-size: 12px; display: block; overflow-x: auto; }
 .aireader-rich th, .aireader-rich td { border: 1px solid var(--air-border); padding: 4px 8px; }
 .aireader-rich th { background: var(--air-bubble); font-weight: 600; }
+/* fallback-renderer tables (when marked is unavailable) */
+.aireader-tablewrap { overflow-x: auto; margin: 6px 0; }
+.aireader-md-table { border-collapse: collapse; font-size: 12px; }
+.aireader-md-table th, .aireader-md-table td { border: 1px solid var(--air-border); padding: 4px 8px; text-align: left; }
+.aireader-md-table th { background: var(--air-bubble); font-weight: 600; }
+
 .aireader-rich .katex { font-size: 1.04em; }
 .aireader-rich .katex-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
 
