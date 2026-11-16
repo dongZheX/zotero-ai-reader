@@ -12,7 +12,7 @@ AIReader = {
 
   HILITE_COLOR: "#ffd400",
   // Visible in the panel header so it's easy to confirm which build is loaded.
-  BUILD: "v0.7.0",
+  BUILD: "0.7.1",
 
   init({ id, version, rootURI }) {
     this.id = id; this.version = version; this.rootURI = rootURI;
@@ -30,6 +30,8 @@ AIReader = {
     { label: "主要结论", q: "主要结论或实验结果是什么？", broad: false },
     { label: "局限", q: "有哪些局限或未来工作？", broad: false },
     { label: "自动高亮", q: "从全文挑选 6-10 个最关键的句子，对每一句用 [[hl:<id>]] 标出；可附 [[note:<id>|一句话理由]]。逐条给出指令并简要说明理由。", broad: true, autoApply: true },
+    { label: "总结我的高亮", q: "请总结我在这篇论文里高亮和批注的内容，并说明它们之间的联系与整体脉络。", broad: false, annos: true },
+    { label: "基于我的批注", q: "基于我在 PDF 里的高亮和批注回答：它们共同说明了什么？我可能在关注哪些问题？有没有遗漏的要点？", broad: false, annos: true },
   ],
 
   // ---------------------------------------------------------- registration
@@ -195,7 +197,7 @@ AIReader = {
     const chips = this._el(doc, "div", "aireader-chips");
     for (const p of this.PRESETS) {
       const c = this._el(doc, "button", "aireader-chip", p.label);
-      c.addEventListener("click", () => this.onChatSend(body, p.q, { broad: p.broad, autoApply: p.autoApply }));
+      c.addEventListener("click", () => this.onChatSend(body, p.q, { broad: p.broad, autoApply: p.autoApply, annos: p.annos }));
       chips.appendChild(c);
     }
     body.appendChild(chips);
@@ -205,7 +207,10 @@ AIReader = {
     input.setAttribute("rows", "1");
     input.setAttribute("data-l10n-id", "aireader-chat-placeholder");
     input.setAttribute("placeholder", "有什么尽管问我…");
-    input.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); this.onChatSend(body); } });
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); this.onChatSend(body); }
+      else if (ev.key === "Escape") { const st = this._bodyState.get(body); if (st && st.streaming) { ev.preventDefault(); st.cancel = true; } }
+    });
     input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = Math.min(140, input.scrollHeight) + "px"; });
     const send = this._el(doc, "button", "aireader-send", "↑");
     send.title = "Send";
@@ -261,13 +266,33 @@ AIReader = {
       ev.preventDefault(); // over a non-scrollable area → don't chain out
     }, { passive: false });
 
-    // (Height is handled purely in CSS — see .aireader-chat-msgs. A JS
-    // measure/resize approach proved unreliable in the reader's document
-    // context and collapsed the panel, so it was removed.)
+    // Measure the panel's real height = window height - our top offset, instead
+    // of guessing a reserve. The flex layout (messages flex:1) then keeps the
+    // chips/composer visible. CSS calc() is only the pre-measurement fallback.
+    try {
+      const win2 = doc.defaultView;
+      const size = () => this._sizeRoot(state);
+      if (win2 && win2.requestAnimationFrame) win2.requestAnimationFrame(size); else size();
+      if (win2 && win2.setTimeout) win2.setTimeout(size, 150);
+      if (win2 && win2.addEventListener) { state._onWinResize = size; win2.addEventListener("resize", size); }
+    } catch (e) { this.log("sizeRoot setup error: " + e); }
 
     // Safety: clear any stale full-height attribute from older versions so the
     // panel can never get stranded blank.
     try { state.doc.documentElement.removeAttribute("data-air-view"); } catch (e) {}
+  },
+
+  // Set the panel's height to the measured available space (window bottom minus
+  // our top). Precise, not a guessed reserve. Flex handles the rest.
+  _sizeRoot(state) {
+    try {
+      const root = state && state.body;
+      const win = root && root.ownerDocument && root.ownerDocument.defaultView;
+      if (!root || !win) return;
+      const top = root.getBoundingClientRect().top;
+      const h = (win.innerHeight || 0) - top - 6;
+      if (h > 140) { root.style.height = h + "px"; root.style.maxHeight = h + "px"; }
+    } catch (e) {}
   },
 
   setComposerEnabled(state, on) {
@@ -543,7 +568,8 @@ AIReader = {
       "1) 回答必须基于论文；论文没涉及的就说没涉及。\n" +
       "2) 在每个关键论断后用 [B<id>] 标出依据的块（可多个），方便用户点回原文。\n" +
       "3) 当用户要求划线/标注，或你认为某处值得高亮时，可输出指令：划线用 [[hl:<id>]]，加批注用 [[note:<id>|批注内容]]。这些会渲染成按钮由用户一键应用到 PDF。\n" +
-      "4) 当用户想看某个图/表的视觉内容、或你需要看图才能准确解释时，输出 [[fig:<id>]]（id 为图/表块），会渲染该区域图像并交给多模态模型识图。\n\n" +
+      "4) 当用户想看某个图/表的视觉内容、或你需要看图才能准确解释时，输出 [[fig:<id>]]（id 为图/表块），会渲染该区域图像并交给多模态模型识图。\n" +
+      "5) 若正文前附有【用户在 PDF 中的高亮与批注】，当用户问到『我的高亮/批注』时请优先结合这些内容回答。\n\n" +
       "论文内容：\n\n" + ctx;
   },
 
@@ -576,15 +602,47 @@ AIReader = {
   addAssistantActions(state, msg, fullText, question) {
     const doc = state.doc;
     const row = this._el(doc, "div", "aireader-actions");
-    const copy = this._el(doc, "span", "aireader-action", "复制");
+    const mkAction = (label) => { const a = this._el(doc, "span", "aireader-action", label); row.appendChild(a); return a; };
+
+    const copy = mkAction("复制");
     copy.addEventListener("click", () => { try { Zotero.Utilities.Internal.copyTextToClipboard(fullText); copy.textContent = "已复制"; setTimeout(() => (copy.textContent = "复制"), 1200); } catch (e) {} });
-    row.appendChild(copy);
-    if (question) {
-      const regen = this._el(doc, "span", "aireader-action", "重新生成");
-      regen.addEventListener("click", () => this._regen(state, msg, question));
-      row.appendChild(regen);
+
+    if (question) mkAction("重新生成").addEventListener("click", () => this._regen(state, msg, question));
+
+    const note = mkAction("存为笔记");
+    note.addEventListener("click", async () => {
+      note.textContent = "存中…";
+      try { await this.saveNoteFromText(state, fullText, question); note.textContent = "✓ 已存"; setTimeout(() => (note.textContent = "存为笔记"), 1500); }
+      catch (e) { note.textContent = "存失败"; this.log("saveNoteFromText error: " + e); }
+    });
+
+    // Apply-all when the answer contains highlight/note directives.
+    const dCount = (fullText.match(/\[\[(?:hl|note):\d+/g) || []).length;
+    if (dCount > 0) {
+      const applyAll = mkAction("应用全部划线 (" + dCount + ")");
+      applyAll.addEventListener("click", async () => {
+        if (applyAll._done || applyAll._busy) return; // avoid duplicate highlights on repeat clicks
+        applyAll._busy = true;
+        applyAll.textContent = "应用中…";
+        const n = await this.autoApplyDirectives(state, fullText);
+        applyAll.textContent = n ? ("✓ 已应用 " + n + " 处") : "未识别到";
+        applyAll._done = n > 0; applyAll._busy = false;
+      });
     }
     msg.appendChild(row);
+
+    // Quick follow-ups below the actions.
+    if (question !== null) {
+      const fups = this._el(doc, "div", "aireader-followups");
+      fups.appendChild(this._el(doc, "span", "aireader-followups-label", "追问"));
+      const FOLLOWUPS = [["更详细", "请在上一条回答基础上展开讲得更详细，补充细节与例子。"], ["举个例子", "针对上一条回答，给一个具体例子帮助理解。"], ["继续", "继续补充上一条回答里没展开的要点。"], ["通俗点", "把上一条回答用更通俗、面向非专业读者的方式再讲一遍。"]];
+      for (const [label, q] of FOLLOWUPS) {
+        const c = this._el(doc, "button", "aireader-followup", label);
+        c.addEventListener("click", () => this._send(state, q, { broad: false }));
+        fups.appendChild(c);
+      }
+      msg.appendChild(fups);
+    }
   },
 
   _regen(state, msg, question) {
@@ -619,18 +677,30 @@ AIReader = {
     const meta = {};
     try {
       await this.ensureBlocks(state);
-      const ctx = opts.broad ? this.buildContext(state.blocks) : this.buildRetrievedContext(state.blocks, text);
+      let ctx = opts.broad ? this.buildContext(state.blocks) : this.buildRetrievedContext(state.blocks, text);
+      if (opts.annos) {
+        const ua = await this.getUserAnnotations(state.attachment);
+        if (ua.length) ctx = "【用户在 PDF 中的高亮与批注】（按出现顺序，优先结合这些回答）：\n" + ua.join("\n") + "\n\n——\n\n论文正文：\n" + ctx;
+        else this.setStatus(state, "这篇论文还没有你的高亮/批注。", "muted");
+      }
       meta.ctxChars = ctx.length;
       this.setStatus(state, "生成中…", "busy");
-      const messages = [{ role: "system", content: this.systemPrompt(ctx) }, ...hist.slice(-12), { role: "user", content: text }];
+      // On regen (skipUser) the question is already the last history entry, so
+      // don't append it again (that duplicated it in the prompt).
+      const messages = [{ role: "system", content: this.systemPrompt(ctx) }, ...hist.slice(-12)];
+      if (!opts.skipUser) messages.push({ role: "user", content: text });
 
       let acc = "", lastR = 0;
       const full = await this.callLLMStream(messages, (d) => {
         acc += d;
+        const el = state.chatMsgs;
+        // Only auto-follow if the user is already near the bottom; don't yank
+        // them back down while they're scrolling up to read earlier content.
+        const stick = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
         const now = Date.now();
         if (now - lastR > 140) { lastR = now; try { this.renderRich(state, bubble, acc); } catch (e) { bubble.textContent = acc; } }
         this.setStatus(state, "生成中… " + acc.length + " 字", "busy");
-        state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight;
+        if (stick) el.scrollTop = el.scrollHeight;
       }, () => state.cancel, meta);
 
       bubble.classList.remove("aireader-streaming");
@@ -851,44 +921,92 @@ AIReader = {
     const doc = state.doc;
     const baseLabel = (kind === "note" ? "✎ 应用批注 p" : "✎ 应用划线 p") + block.pageLabel;
     const btn = this._el(doc, "a", "aireader-apply", baseLabel);
-    btn.title = block.text.slice(0, 160);
+    btn.title = (comment ? comment + "\n\n" : "") + block.text.slice(0, 160);
+    // Render the applied state: label (click → jump to PDF) + a ✕ to remove.
+    const setApplied = () => {
+      btn.textContent = "";
+      btn.classList.add("aireader-apply-done");
+      const lbl = this._el(doc, "span", "aireader-apply-label", "✓ 已标注 p" + block.pageLabel + " · 点击跳转");
+      const del = this._el(doc, "span", "aireader-apply-del", "✕");
+      del.title = "取消该标注";
+      del.addEventListener("click", async (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        if (btn._busy) return; btn._busy = true;
+        try {
+          // Sweep EVERY AI annotation at this block's spot. Applying both 划线
+          // and 批注 to one block stacks two overlapping highlights; deleting
+          // only one leaves the other ("颜色浅了一下还在"). The sweep clears all.
+          let removed = 0;
+          try { removed = await AIReader.removeAnnotationsForBlock(state.attachment, block); } catch (e) { AIReader.log("sweep remove: " + e); }
+          // Fallback: nothing matched by spot (e.g. sortIndex drift) → delete the
+          // exact annotation this button created.
+          if (!removed) await AIReader.removeAnnotation(btn._ann, state.attachment);
+          btn._ann = null; btn.classList.remove("aireader-apply-done"); btn.textContent = baseLabel;
+        }
+        catch (e) { del.textContent = "✕?"; del.title = "取消失败：" + (e.message || e); AIReader.log("remove annotation error: " + e); }
+        finally { btn._busy = false; }
+      });
+      btn.appendChild(lbl); btn.appendChild(del);
+    };
     btn.addEventListener("click", async (ev) => {
       ev.preventDefault();
       if (btn._busy) return;
+      if (btn._ann) { AIReader.navigateTo(state.attachment.id, block); return; } // applied → jump to PDF
       btn._busy = true;
+      btn.textContent = "…";
       try {
-        if (btn._ann) {
-          // Toggle off: remove the annotation we created.
-          btn.textContent = "…";
-          await AIReader.removeAnnotation(btn._ann);
-          btn._ann = null;
-          btn.classList.remove("aireader-apply-done");
-          btn.textContent = baseLabel;
-        } else {
-          btn.textContent = "…";
-          const ann = await AIReader.applyAnnotation(state.attachment, block, { type: "highlight", comment });
-          btn._ann = ann || true;
-          btn.classList.add("aireader-apply-done");
-          btn.textContent = "✓ 已标注 p" + block.pageLabel + " · 重复点击取消";
-        }
+        btn._ann = (await AIReader.applyAnnotation(state.attachment, block, { type: "highlight", comment })) || true;
+        setApplied();
       } catch (e) {
         btn.textContent = "✗ " + (e.message || "失败");
-        AIReader.log("apply/remove annotation error: " + e);
+        AIReader.log("apply annotation error: " + e);
       } finally { btn._busy = false; }
     });
     return btn;
   },
 
-  // Delete an annotation created by the apply button (toggle-off).
-  async removeAnnotation(ann) {
+  // Delete an annotation created by the apply button (toggle-off). Resolves the
+  // real Item by eraseTx-capable ref, then by key via getByLibraryAndKey, then
+  // by scanning the attachment's annotations for the key. Throws if not found
+  // so the UI can keep the applied state instead of pretending it was removed.
+  async removeAnnotation(ann, attachment) {
     if (!ann || ann === true) return;
-    if (typeof ann.eraseTx === "function") { await ann.eraseTx(); return; }
-    if (ann.id != null && Zotero.Items && typeof Zotero.Items.erase === "function") { await Zotero.Items.erase(ann.id); return; }
-    if (ann.key && ann.libraryID && Zotero.Items && typeof Zotero.Items.getByLibraryAndKey === "function") {
-      const it = Zotero.Items.getByLibraryAndKey(ann.libraryID, ann.key);
-      if (it && typeof it.eraseTx === "function") { await it.eraseTx(); return; }
+    const canErase = (x) => x && typeof x.eraseTx === "function";
+    let item = canErase(ann) ? ann : (canErase(ann.item) ? ann.item : null);
+    const libraryID = ann.libraryID || (ann.item && ann.item.libraryID) || (attachment && attachment.libraryID);
+    const key = ann.key || (ann.item && ann.item.key);
+    if (!item && key && libraryID && Zotero.Items && typeof Zotero.Items.getByLibraryAndKey === "function") {
+      const it = Zotero.Items.getByLibraryAndKey(libraryID, key);
+      if (canErase(it)) item = it;
     }
-    throw new Error("无法取消该标注");
+    if (!item && key && attachment && typeof attachment.getAnnotations === "function") {
+      for (let a of (attachment.getAnnotations() || [])) {
+        if (typeof a === "number") a = Zotero.Items.get(a);
+        if (a && a.key === key) { if (canErase(a)) item = a; break; }
+      }
+    }
+    if (item) { await item.eraseTx(); return; }
+    if (ann.id != null && Zotero.Items && typeof Zotero.Items.erase === "function") { await Zotero.Items.erase(ann.id); return; }
+    throw new Error("找不到对应标注");
+  },
+
+  // Erase EVERY AI-created annotation sitting at this block's spot (same
+  // sortIndex + "AI" tag). "应用划线" and "应用批注" each create a separate
+  // highlight at the same position, so a single eraseTx leaves one behind and
+  // the PDF still looks highlighted. This clears the whole stack in one go.
+  // Returns the number erased (0 = nothing to remove, caller falls back).
+  async removeAnnotationsForBlock(attachment, block) {
+    if (!attachment || !block || !block.position || typeof attachment.getAnnotations !== "function") return 0;
+    const si = this.sortIndex(block);
+    let removed = 0;
+    for (let a of (attachment.getAnnotations() || [])) {
+      if (typeof a === "number") a = Zotero.Items.get(a);
+      if (!a || typeof a.eraseTx !== "function") continue;
+      if (!(a.hasTag && a.hasTag("AI"))) continue;
+      if (a.annotationSortIndex !== si) continue;
+      try { await a.eraseTx(); removed++; } catch (e) { this.log("sweep erase: " + e); }
+    }
+    return removed;
   },
 
   makeFigButton(state, block) {
@@ -946,14 +1064,22 @@ AIReader = {
       sortIndex: this.sortIndex(block),
       position: { pageIndex: block.position.pageIndex, rects: [[x1, y1, x2, y2]] },
     };
-    const ann = await Zotero.Annotations.saveFromJSON(attachment, json);
+    const saved = await Zotero.Annotations.saveFromJSON(attachment, json);
+    // Resolve the real annotation Item by key so toJSON works AND the temporary
+    // annotation is reliably erased afterwards (otherwise it litters the PDF).
+    let ann = (saved && typeof saved.eraseTx === "function") ? saved : null;
+    if (!ann) { try { if (Zotero.Items.getByLibraryAndKey) ann = Zotero.Items.getByLibraryAndKey(attachment.libraryID, json.key) || null; } catch (e) {} }
+    if (!ann) ann = saved;
     try {
       await Zotero.PDFWorker.renderAttachmentAnnotations(attachment.id);
       const j = await Zotero.Annotations.toJSON(ann);
       if (!j || !j.image) throw new Error("渲染结果为空");
       return j.image; // data:image/png;base64,...
     } finally {
-      try { await ann.eraseTx(); } catch (e) {}
+      try {
+        if (ann && typeof ann.eraseTx === "function") await ann.eraseTx();
+        else if (Zotero.Items.getByLibraryAndKey) { const it = Zotero.Items.getByLibraryAndKey(attachment.libraryID, json.key); if (it && it.eraseTx) await it.eraseTx(); }
+      } catch (e) {}
       try { await Zotero.Annotations.removeCacheImage(ann); } catch (e) {}
     }
   },
@@ -996,6 +1122,30 @@ AIReader = {
     return pad(pi, 5) + "|" + pad(0, 6) + "|" + pad(top, 5);
   },
 
+  // Read the user's existing highlights/underlines/notes from the PDF so the
+  // model can answer "based on my highlights / summarize my notes".
+  async getUserAnnotations(attachment) {
+    const out = [];
+    try {
+      let anns = (attachment && attachment.getAnnotations) ? attachment.getAnnotations() : [];
+      for (let a of (anns || [])) {
+        if (typeof a === "number") a = Zotero.Items.get(a);
+        if (!a) continue;
+        const type = a.annotationType;
+        if (type !== "highlight" && type !== "underline" && type !== "note") continue;
+        const txt = (a.annotationText || "").replace(/\s+/g, " ").trim();
+        const cmt = (a.annotationComment || "").trim();
+        const pg = a.annotationPageLabel || "";
+        if (!txt && !cmt) continue;
+        let line = "[p" + pg + "] ";
+        if (txt) line += "“" + txt + "”";
+        if (cmt) line += (txt ? " —— 批注：" : "批注：") + cmt;
+        out.push(line);
+      }
+    } catch (e) { this.log("getUserAnnotations error: " + e); }
+    return out;
+  },
+
   async applyAnnotation(attachment, block, { type, comment }) {
     if (!attachment || !attachment.libraryID) throw new Error("No attachment");
     if (!Zotero.Annotations || typeof Zotero.Annotations.saveFromJSON !== "function") throw new Error("Annotation API unavailable");
@@ -1010,7 +1160,51 @@ AIReader = {
       position: block.position,
       tags: [{ name: "AI" }],
     };
-    return Zotero.Annotations.saveFromJSON(attachment, json);
+    const saved = await Zotero.Annotations.saveFromJSON(attachment, json);
+    // Return an object that always carries key + libraryID (+ the Item if we
+    // can resolve it now) so toggle-off can reliably find and delete it.
+    let item = (saved && typeof saved.eraseTx === "function") ? saved : null;
+    if (!item) { try { if (Zotero.Items.getByLibraryAndKey) item = Zotero.Items.getByLibraryAndKey(attachment.libraryID, json.key) || null; } catch (e) {} }
+    return { key: json.key, libraryID: attachment.libraryID, item };
+  },
+
+  // Annotate a reader text selection with an AI comment. The reader hands us a
+  // PENDING annotation (`params.annotation`) that already carries the exact
+  // position / sortIndex / pageLabel — more reliable than our block geometry.
+  //   • selection sits on an EXISTING highlight → append the note into it
+  //     (so "AI 解释" on a highlighted passage writes a note, no duplicate).
+  //   • plain selection → create a new highlight carrying the note.
+  async annotateSelection(reader, pendingAnn, comment) {
+    const attachment = reader && Zotero.Items.get(reader.itemID);
+    if (!attachment || !attachment.libraryID) throw new Error("No attachment");
+    if (!Zotero.Annotations || typeof Zotero.Annotations.saveFromJSON !== "function") throw new Error("Annotation API unavailable");
+    const si = pendingAnn && pendingAnn.sortIndex;
+    if (si && typeof attachment.getAnnotations === "function") {
+      for (let a of (attachment.getAnnotations() || [])) {
+        if (typeof a === "number") a = Zotero.Items.get(a);
+        if (!a || typeof a.saveTx !== "function") continue;
+        if (a.annotationSortIndex !== si) continue;
+        if (a.annotationType !== "highlight" && a.annotationType !== "underline") continue;
+        const prev = (a.annotationComment || "").trim();
+        a.annotationComment = prev ? (prev + "\n\n" + comment) : comment;
+        try { if (a.addTag) a.addTag("AI"); } catch (e) {}
+        await a.saveTx();
+        return { key: a.key, updated: true };
+      }
+    }
+    const json = {
+      key: Zotero.Utilities.generateObjectKey(),
+      type: "highlight",
+      text: (pendingAnn && pendingAnn.text) || "",
+      comment: comment || "",
+      color: (pendingAnn && pendingAnn.color) || this.HILITE_COLOR,
+      pageLabel: (pendingAnn && pendingAnn.pageLabel) || "",
+      sortIndex: si,
+      position: pendingAnn && pendingAnn.position,
+      tags: [{ name: "AI" }],
+    };
+    await Zotero.Annotations.saveFromJSON(attachment, json);
+    return { key: json.key, updated: false };
   },
 
   // ----------------------------------------------------- save as Zotero note
@@ -1020,16 +1214,76 @@ AIReader = {
     const hist = this._chatStore.get(state.attachment.key) || [];
     if (!hist.length) { this.setStatus(state, "没有可保存的对话。", "muted"); return; }
     try {
-      let parent = state.item;
-      if (parent && parent.isAttachment && parent.isAttachment()) parent = parent.parentItem || parent;
-      const html = this.historyToHTML(state, hist);
-      const note = new Zotero.Item("note");
-      note.libraryID = parent.libraryID;
-      if (parent.isRegularItem && parent.isRegularItem()) note.parentID = parent.id;
-      note.setNote(html);
-      await note.saveTx();
-      this.setStatus(state, "已存为 Zotero 笔记。", "ok");
+      let inner = "";
+      for (const m of hist) {
+        if (m.role === "user") inner += "<p><strong>问：</strong>" + this._escapeHTML(m.content) + "</p>\n";
+        else inner += this._answerToHTML(state, m.content);
+      }
+      inner += this._noteFooter();
+      const n = await this._appendOrCreateNote(state, inner);
+      this.setStatus(state, n && n._aireaderAppended ? "已追加到现有 AI 笔记。" : "已存为 Zotero 笔记。", "ok");
     } catch (e) { this.log("saveNote error: " + e); this.setStatus(state, "存笔记失败: " + e.message, "error"); }
+  },
+
+  // Save a single answer (optionally with its question) to the item's AI note.
+  async saveNoteFromText(state, text, question) {
+    let inner = "";
+    if (question) inner += "<p><strong>问：</strong>" + this._escapeHTML(question) + "</p>\n";
+    inner += this._answerToHTML(state, text);
+    inner += this._noteFooter();
+    await this._appendOrCreateNote(state, inner);
+  },
+
+  _noteFooter() {
+    const model = this.getPref("model") || "";
+    const when = new Date().toLocaleString();
+    return '<p style="color:#9aa0a6;font-size:0.85em">— AI Reader · ' + this._escapeHTML(model) + " · " + this._escapeHTML(when) + "</p>\n";
+  },
+
+  async _findAINote(parent) {
+    try {
+      if (!parent || !parent.getNotes) return null;
+      for (const id of (parent.getNotes() || [])) {
+        const n = Zotero.Items.get(id);
+        if (n && n.hasTag && n.hasTag("AI Reader")) return n;
+      }
+    } catch (e) {}
+    return null;
+  },
+
+  // Append to the item's existing "AI Reader"-tagged note, or create one.
+  async _appendOrCreateNote(state, innerHTML) {
+    let parent = state.item;
+    if (parent && parent.isAttachment && parent.isAttachment()) parent = parent.parentItem || parent;
+    if (!parent) throw new Error("无父条目");
+    const existing = await this._findAINote(parent);
+    if (existing) {
+      existing.setNote(existing.getNote() + "\n<hr/>\n" + innerHTML);
+      await existing.saveTx();
+      existing._aireaderAppended = true;
+      return existing;
+    }
+    const title = (state.item && state.item.getDisplayTitle && state.item.getDisplayTitle()) || "AI Reader";
+    const note = new Zotero.Item("note");
+    note.libraryID = parent.libraryID;
+    if (parent.isRegularItem && parent.isRegularItem()) note.parentID = parent.id;
+    note.setNote("<h1>AI Reader — " + this._escapeHTML(title) + "</h1>\n" + innerHTML);
+    try { note.addTag("AI Reader"); } catch (e) {}
+    await note.saveTx();
+    return note;
+  },
+
+  _answerToHTML(state, text) {
+    const lines = (text || "").split(/\r?\n/);
+    let html = "", inUl = false;
+    for (const line of lines) {
+      const t = line.trim();
+      const bullet = /^[-*•]\s+/.test(t) || /^\d+[.)]\s+/.test(t);
+      if (bullet) { if (!inUl) { html += "<ul>"; inUl = true; } html += "<li>" + this._mdInlineHTML(state, t.replace(/^([-*•]|\d+[.)])\s+/, "")) + "</li>"; }
+      else { if (inUl) { html += "</ul>"; inUl = false; } if (t) html += "<p>" + this._mdInlineHTML(state, t.replace(/^#{1,6}\s+/, "")) + "</p>\n"; }
+    }
+    if (inUl) html += "</ul>";
+    return html;
   },
 
   _escapeHTML(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); },
@@ -1042,7 +1296,15 @@ AIReader = {
       out += this._escapeHTML(text.slice(last, m.index));
       last = re.lastIndex;
       if (m[1]) { /* drop annotation directives in notes */ }
-      else if (m[4] !== undefined) { const b = byId.get(Number(m[4])); out += b ? ' <span style="color:#888">(p' + this._escapeHTML(b.pageLabel) + ")</span>" : ""; }
+      else if (m[4] !== undefined) {
+        const b = byId.get(Number(m[4]));
+        if (b) {
+          const key = state.attachment && state.attachment.key;
+          const page = (b.pageLabel && b.pageLabel !== "?") ? b.pageLabel : "";
+          if (key && page) out += ' <a href="zotero://open-pdf/library/items/' + key + "?page=" + encodeURIComponent(page) + '" style="color:#3b7ddd;text-decoration:none">(p' + this._escapeHTML(page) + ")</a>";
+          else out += ' <span style="color:#888">(p' + this._escapeHTML(b.pageLabel) + ")</span>";
+        }
+      }
       else if (m[5] !== undefined) out += "<strong>" + this._escapeHTML(m[5]) + "</strong>";
       else if (m[6] !== undefined) out += "<code>" + this._escapeHTML(m[6]) + "</code>";
     }
@@ -1054,16 +1316,8 @@ AIReader = {
     const title = (state.item && state.item.getDisplayTitle && state.item.getDisplayTitle()) || "AI Reader";
     let html = "<h1>AI Reader — " + this._escapeHTML(title) + "</h1>\n";
     for (const m of hist) {
-      if (m.role === "user") { html += "<p><strong>问：</strong>" + this._escapeHTML(m.content) + "</p>\n"; continue; }
-      const lines = (m.content || "").split(/\r?\n/);
-      let inUl = false;
-      for (const line of lines) {
-        const t = line.trim();
-        const bullet = /^[-*•]\s+/.test(t) || /^\d+[.)]\s+/.test(t);
-        if (bullet) { if (!inUl) { html += "<ul>"; inUl = true; } html += "<li>" + this._mdInlineHTML(state, t.replace(/^([-*•]|\d+[.)])\s+/, "")) + "</li>"; }
-        else { if (inUl) { html += "</ul>"; inUl = false; } if (t) html += "<p>" + this._mdInlineHTML(state, t.replace(/^#{1,6}\s+/, "")) + "</p>\n"; }
-      }
-      if (inUl) html += "</ul>";
+      if (m.role === "user") html += "<p><strong>问：</strong>" + this._escapeHTML(m.content) + "</p>\n";
+      else html += this._answerToHTML(state, m.content);
     }
     return html;
   },
@@ -1207,32 +1461,91 @@ AIReader = {
         ";font-family:" + this._UIFONT + ";color:" + fg + ";";
       const mkSep = () => { const s = doc.createElementNS("http://www.w3.org/1999/xhtml", "div"); s.style.cssText = "height:0;border-top:0.5px solid " + border + ";margin:4px 8px;"; return s; };
 
+      // result text — selectable so the user can copy with the mouse too
       const result = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
       result.style.cssText = "display:none;margin:5px 7px 3px;padding-top:7px;border-top:0.5px solid " + border +
-        ";max-width:320px;font-size:12px;line-height:1.5;white-space:pre-wrap;color:" + fg + ";";
+        ";max-width:320px;max-height:220px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;color:" + fg +
+        ";user-select:text;-webkit-user-select:text;cursor:text;";
 
-      const mkItem = (label, primary, run) => {
+      // action row under a result (copy / write-to-annotation); hidden until a
+      // result exists
+      const actions = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+      actions.style.cssText = "display:none;gap:8px;margin:2px 7px 4px;";
+      const mkMini = (label) => {
         const b = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
         b.textContent = label;
-        const base = "display:flex;align-items:center;cursor:pointer;padding:7px 12px;border-radius:8px;font-size:13px;line-height:1.25;white-space:nowrap;min-height:24px;transition:background .08s;color:" + (primary ? accent : fg) + ";font-weight:" + (primary ? "600" : "450") + ";";
-        b.style.cssText = base;
+        b.style.cssText = "display:inline-flex;align-items:center;cursor:pointer;padding:4px 10px;border-radius:7px;font-size:11.5px;font-weight:600;color:" + accent + ";background:transparent;border:0.5px solid " + border + ";margin-inline-end:8px;transition:background .08s,color .08s;";
         b.addEventListener("mouseenter", () => { b.style.background = accent; b.style.color = "#fff"; });
-        b.addEventListener("mouseleave", () => { b.style.background = "transparent"; b.style.color = primary ? accent : fg; });
-        b.addEventListener("click", run);
+        b.addEventListener("mouseleave", () => { b.style.background = "transparent"; b.style.color = accent; });
         return b;
       };
-      const showInline = (run) => async () => { result.style.display = "block"; result.textContent = "…"; try { result.textContent = (await run()).trim(); } catch (e) { result.textContent = "出错：" + e.message; } };
       const lang = this.getPref("language") || "中文";
+      let lastResult = "";
+      const copyBtn = mkMini("复制");
+      copyBtn.addEventListener("click", () => {
+        if (!lastResult) return;
+        const ok = AIReader._copyText(doc, lastResult);
+        copyBtn.textContent = ok ? "已复制 ✓" : "复制失败";
+        setTimeout(() => { copyBtn.textContent = "复制"; }, 1400);
+      });
+      const annoBtn = mkMini("写入 PDF 批注");
+      annoBtn.addEventListener("click", async () => {
+        if (!lastResult || annoBtn._busy) return; annoBtn._busy = true;
+        const orig = annoBtn.textContent; annoBtn.textContent = "写入中…";
+        try {
+          const r = await AIReader.annotateSelection(reader, params.annotation, "AI 解释：" + lastResult);
+          annoBtn.textContent = r.updated ? "已写入高亮批注 ✓" : "已加高亮+批注 ✓";
+        } catch (e) { annoBtn.textContent = "写入失败"; AIReader.log("annotateSelection: " + e); }
+        finally { annoBtn._busy = false; setTimeout(() => { annoBtn.textContent = orig; }, 1800); }
+      });
+      actions.appendChild(copyBtn); actions.appendChild(annoBtn);
 
-      wrap.appendChild(mkItem("问 AI（引用到侧栏）", true, () => {
+      // resting (non-hover) style for an item, by role
+      const restBg = "transparent";
+      const mkItem = (label, primary, run) => {
+        const b = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+        const labelSpan = doc.createElementNS("http://www.w3.org/1999/xhtml", "span");
+        labelSpan.textContent = label; b.appendChild(labelSpan);
+        const restFg = primary ? accent : fg;
+        b.style.cssText = "display:flex;align-items:center;cursor:pointer;padding:7px 12px;border-radius:8px;font-size:13px;line-height:1.25;white-space:nowrap;min-height:24px;transition:background .08s;background:" + restBg + ";color:" + restFg + ";font-weight:" + (primary ? "600" : "450") + ";";
+        // Hover is driven ONLY by enter/leave and always resets on leave — no
+        // "busy" guard, so the highlight can never get stuck after an async run.
+        b.addEventListener("mouseenter", () => { b.style.background = accent; b.style.color = "#fff"; });
+        b.addEventListener("mouseleave", () => { b.style.background = restBg; b.style.color = restFg; });
+        b.addEventListener("click", () => run(b, labelSpan));
+        return b;
+      };
+      // Stream a producer into the result area with live feedback. Busy state is
+      // shown ONLY via the label text + result area (never the background), so it
+      // can't collide with hover styling.
+      const runStream = (btn, labelSpan, baseLabel, waitText, showActions, streamRun) => async () => {
+        if (btn._busy) return; btn._busy = true;
+        labelSpan.textContent = baseLabel + " · " + waitText + " ⏳";
+        result.style.display = "block"; result.style.color = fg; result.textContent = "⏳ " + waitText + "…";
+        actions.style.display = "none"; lastResult = "";
+        let acc = "";
+        try {
+          await streamRun((d) => { acc += d; result.textContent = acc; try { result.scrollTop = result.scrollHeight; } catch (e) {} });
+          lastResult = acc.trim();
+          result.textContent = lastResult || "(空响应)";
+          if (showActions && lastResult) actions.style.display = "flex";
+        } catch (e) { result.style.color = accent; result.textContent = "出错：" + (e.message || e); }
+        finally { btn._busy = false; labelSpan.textContent = baseLabel; }
+      };
+
+      wrap.appendChild(mkItem("问 AI（引用到侧栏）", true, (b) => {
         this.quoteSelection(reader, text);
         result.style.display = "block"; result.style.color = accent;
-        result.textContent = "已引用到右侧输入框 →";
+        result.textContent = "已引用到右侧输入框 →"; actions.style.display = "none"; lastResult = "";
       }));
       wrap.appendChild(mkSep());
-      wrap.appendChild(mkItem("AI 解释", false, showInline(() => this.callLLM([{ role: "system", content: "You explain excerpts from academic papers clearly and concisely in " + lang + ". 2-4 sentences." }, { role: "user", content: "Explain this passage:\n\n" + text }]))));
-      wrap.appendChild(mkItem("翻译", false, showInline(() => this.callLLM([{ role: "system", content: "You are a professional translator. Translate into " + lang + ". Output only the translation." }, { role: "user", content: text }]))));
+      // AI 解释：流式输出，看得到论文相关段落 + 之前的对话历史；完成后出「复制 / 写入批注」
+      wrap.appendChild(mkItem("AI 解释", false, (b, ls) =>
+        runStream(b, ls, "AI 解释", "解释中", true, (onDelta) => this.explainSelectionStream(reader, text, onDelta))()));
+      wrap.appendChild(mkItem("翻译", false, (b, ls) =>
+        runStream(b, ls, "翻译", "翻译中", false, (onDelta) => this.callLLMStream([{ role: "system", content: "You are a professional translator. Translate into " + lang + ". Output only the translation." }, { role: "user", content: text }], onDelta, () => false))()));
       wrap.appendChild(result);
+      wrap.appendChild(actions);
       append(wrap);
     } catch (e) { this.log("popup error: " + e); }
   },
@@ -1283,6 +1596,56 @@ AIReader = {
       hist.push({ role: "assistant", content: ans });
       this.saveChat(att, hist).catch(() => {});
     } catch (e) { this.log("askFromSelection headless error: " + e); }
+  },
+
+  // Build the grounded message list for explaining a selection: inject the
+  // paper's most-relevant blocks (retrieval on the selection) AND the recent
+  // conversation so the explanation builds on what we've already discussed —
+  // not an isolated one-shot.
+  async _explainMessages(reader, text) {
+    const lang = this.getPref("language") || "中文";
+    let att = null, key = null;
+    try { att = Zotero.Items.get(reader.itemID); key = att && att.key; } catch (e) {}
+    let ctx = "";
+    try {
+      let blocks = key && this._blockStore.get(key);
+      if (!blocks && att) { blocks = await this.extractBlocks(att.id); if (blocks && key) this._blockStore.set(key, blocks); }
+      if (blocks) ctx = this.buildRetrievedContext(blocks, text);
+    } catch (e) { this.log("explain ctx error: " + e); }
+    const hist = (key && this._chatStore.get(key)) || [];
+    const sys = "You explain excerpts from academic papers clearly and concisely in " + lang +
+      ". 2-4 sentences. Use the paper context and the prior conversation when they help; stay consistent with earlier answers." +
+      (ctx ? ("\n\n## 论文相关段落\n" + ctx) : "");
+    const messages = [{ role: "system", content: sys }];
+    for (const m of hist.slice(-8)) if (m && m.role && m.content) messages.push({ role: m.role, content: m.content });
+    messages.push({ role: "user", content: "请解释下面这段原文（结合论文上下文与我们之前的讨论）：\n“" + text + "”" });
+    return messages;
+  },
+
+  // Non-streaming explain (used by tests / headless paths).
+  async explainSelectionText(reader, text) {
+    return await this.callLLM(await this._explainMessages(reader, text));
+  },
+
+  // Streaming explain: emits deltas via onDelta for the popup's live output.
+  async explainSelectionStream(reader, text, onDelta) {
+    return await this.callLLMStream(await this._explainMessages(reader, text), onDelta || (() => {}), () => false);
+  },
+
+  // Copy text to the clipboard from inside the reader webview. Tries Zotero's
+  // helper, then the clipboard service, then a DOM fallback. Returns success.
+  _copyText(doc, text) {
+    try { if (Zotero.Utilities && Zotero.Utilities.Internal && Zotero.Utilities.Internal.copyTextToClipboard) { Zotero.Utilities.Internal.copyTextToClipboard(text); return true; } } catch (e) {}
+    try {
+      const win = doc && doc.defaultView;
+      if (win && win.navigator && win.navigator.clipboard) { win.navigator.clipboard.writeText(text); return true; }
+    } catch (e) {}
+    try {
+      const ta = doc.createElementNS("http://www.w3.org/1999/xhtml", "textarea");
+      ta.value = text; (doc.body || doc.documentElement).appendChild(ta); ta.select();
+      const ok = doc.execCommand && doc.execCommand("copy"); ta.remove(); return !!ok;
+    } catch (e) {}
+    return false;
   },
 
   // ----------------------------------------------------------------- cache

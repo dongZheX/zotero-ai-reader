@@ -14,10 +14,18 @@
   color: var(--fill-primary, inherit);
   position: relative;
   box-sizing: border-box;
-  /* Auto height (content-driven). The messages area is the scroller and JS
-     sizes it to fill down to the window bottom so the composer sits at the
-     bottom with no dead space. */
+  max-width: 100%;
+  min-width: 0;
+  /* Bounded-height flex column (pure CSS). The messages area (flex:1) shrinks
+     to make room, so the chips + model row + composer (flex:0 0 auto) are
+     ALWAYS visible no matter how many chips wrap. overflow:hidden means we
+     never push the outer pane into scrolling. */
+  height: calc(100vh - 120px);
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
 }
+/* Fixed rows never shrink; only the messages area (flex:1) does. */
+.aireader-top, .aireader-status, .aireader-chips, .aireader-footer, .aireader-composer { flex: 0 0 auto; }
 
 /* kill native OS button chrome everywhere in the panel */
 .aireader-root button,
@@ -51,6 +59,23 @@
   user-select: none;
 }
 .aireader-action:hover { color: var(--air-accent); }
+/* quick follow-ups under an answer — light text links, not boxy chips, so
+   they read differently from the preset chips row below */
+.aireader-followups { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 6px 2px 2px; }
+.aireader-followups-label { font-size: 11px; color: var(--air-muted); opacity: .8; }
+.aireader-followup {
+  -moz-appearance: none;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--air-accent);
+  cursor: pointer;
+  opacity: .92;
+}
+.aireader-followup:hover { text-decoration: underline; opacity: 1; }
 
 /* ---- citation hover preview ---- */
 .aireader-preview {
@@ -123,12 +148,13 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* The only scroller in the panel; pure-CSS height (a JS measure/resize proved
-     unreliable in the reader document and collapsed the panel). Tracks the
-     window height within a sensible range. overscroll-behavior:contain stops
-     the wheel chaining out to the pane/window at top/bottom (no jumping to
-     other sections or other apps). */
-  height: clamp(240px, 72vh, 1100px);
+  /* The only scroller in the panel. flex:1 fills the space between the header
+     and the pinned chips/composer, and SHRINKS to keep them visible no matter
+     how many chips wrap. overscroll-behavior:contain stops the wheel chaining
+     out at top/bottom (no jumping to other sections or other apps). */
+  flex: 1 1 0;
+  min-height: 60px;
+  min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 4px 2px;
@@ -231,6 +257,14 @@
   background: var(--accent-green, #3fae5a);
   color: #fff;
 }
+.aireader-apply-done:hover { background: var(--accent-green, #3fae5a); color: #fff; }
+.aireader-apply-del {
+  margin-inline-start: 7px;
+  padding-inline-start: 7px;
+  border-inline-start: 1px solid rgba(255,255,255,.5);
+  opacity: .85;
+}
+.aireader-apply-del:hover { opacity: 1; font-weight: 700; }
 .aireader-figbtn {
   border-style: solid;
   border-color: var(--accent-purple, #a28ae5);
@@ -238,16 +272,23 @@
 }
 .aireader-figbtn:hover { background: var(--accent-purple, #a28ae5); color: #fff; }
 
-/* ---- suggested-question chips ---- */
+/* ---- suggested-question chips: single scrollable row so a growing preset
+   list can't push the composer off-screen ---- */
 .aireader-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: wrap;         /* wrap never widens the panel (nowrap did, clipping content) */
   gap: 6px;
+  max-width: 100%;
+  max-height: 68px;        /* ~2 rows; scroll inside if more presets, so the composer stays visible */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
+.aireader-chip { flex: 0 0 auto; max-width: 100%; }
 .aireader-chip {
   font: inherit;
-  font-size: 12px;
-  padding: 5px 13px;
+  font-size: 11px;
+  padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid transparent;
   background: var(--air-bubble);

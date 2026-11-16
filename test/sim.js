@@ -121,6 +121,94 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    console.log('removeAnnotation toggle-off: OK');
  }
 
+ // removeAnnotationsForBlock: sweeps EVERY AI-tagged annotation at the block's
+ // sortIndex (applying both 划线 and 批注 stacks two highlights at one spot, so
+ // a single eraseTx leaves one behind — "颜色浅了一下还在"). Non-AI annotations
+ // and annotations at other spots are left untouched.
+ { const si=A.sortIndex(posBlock); let erased=0;
+   const mk=(sidx,ai)=>({annotationSortIndex:sidx, hasTag:t=>t==='AI'&&ai, async eraseTx(){erased++;}});
+   const att={ getAnnotations:()=>[ mk(si,true), mk(si,true), mk(si,false), mk('99999|000000|00000',true) ] };
+   const n=await A.removeAnnotationsForBlock(att, posBlock);
+   assert(n===2 && erased===2,'removeAnnotationsForBlock erases both AI annotations at the spot only');
+   console.log('removeAnnotationsForBlock sweep: OK');
+ }
+
+ // annotateSelection: existing highlight at the spot → append note into its
+ // comment (AI 解释 on highlighted text writes a note, no duplicate); no
+ // existing highlight → create a new highlight carrying the note.
+ { let savedComment=null;
+   const si='00003|000000|00123';
+   const existing={ annotationSortIndex:si, annotationType:'highlight', annotationComment:'', _tags:[],
+     addTag(t){this._tags.push(t);}, async saveTx(){savedComment=this.annotationComment;} };
+   const attWith={ libraryID:1, getAnnotations:()=>[existing] };
+   const attNone={ libraryID:1, getAnnotations:()=>[] };
+   const origGet=ctx.Zotero.Items.get; let which=attWith;
+   ctx.Zotero.Items.get=()=>which;
+   savedAnnotation=null;
+   const r1=await A.annotateSelection({itemID:7}, {sortIndex:si, text:'T', pageLabel:'3', position:{pageIndex:2}}, 'AI 解释：X');
+   assert(r1.updated===true && /AI 解释：X/.test(savedComment) && existing._tags.includes('AI'),'annotateSelection writes note into existing highlight');
+   which=attNone;
+   const r2=await A.annotateSelection({itemID:7}, {sortIndex:si, text:'T', pageLabel:'3', position:{pageIndex:2}}, 'AI 解释：Y');
+   ctx.Zotero.Items.get=origGet;
+   assert(r2.updated===false && savedAnnotation && savedAnnotation.json.comment==='AI 解释：Y' && savedAnnotation.json.tags[0].name==='AI','annotateSelection creates new highlight+note when none exists');
+   console.log('annotateSelection update/create: OK');
+ }
+
+ // explainSelectionText: the reader-popup "AI 解释" must be grounded — it injects
+ // the paper's relevant blocks AND the prior conversation so the explanation
+ // builds on earlier answers (not an isolated one-shot).
+ { const origGet=ctx.Zotero.Items.get; ctx.Zotero.Items.get=()=>({id:7,key:'KX'});
+   A._blockStore.set('KX', blocks);
+   A._chatStore.set('KX', [{role:'user',content:'先前的问题'},{role:'assistant',content:'先前的回答ZZZ'}]);
+   let seen=null; const origLLM=A.callLLM; A.callLLM=async(msgs)=>{ seen=msgs; return '解释文本'; };
+   const out=await A.explainSelectionText({itemID:7}, 'vision encoder capacity');
+   A.callLLM=origLLM; ctx.Zotero.Items.get=origGet;
+   assert(out==='解释文本','explainSelectionText returns the answer');
+   assert(seen && /论文相关段落/.test(seen[0].content) && /\[B/.test(seen[0].content),'explain system prompt carries retrieved paper context');
+   assert(seen.some(m=>m.content==='先前的回答ZZZ'),'explain injects prior conversation history');
+   assert(seen[seen.length-1].role==='user' && /vision encoder capacity/.test(seen[seen.length-1].content),'explain ends with the selection as the user turn');
+   // streaming variant: deltas flow through onDelta and the grounded context is kept
+   ctx.Zotero.Items.get=()=>({id:7,key:'KX'});
+   let got2=''; let seen2=null; const origStream=A.callLLMStream;
+   A.callLLMStream=async(msgs,onDelta)=>{ seen2=msgs; for(const ch of ['解','释','流']) onDelta(ch); return '解释流'; };
+   const outS=await A.explainSelectionStream({itemID:7}, 'vision encoder capacity', d=>{got2+=d;});
+   A.callLLMStream=origStream; ctx.Zotero.Items.get=origGet;
+   assert(got2==='解释流' && outS==='解释流','explainSelectionStream streams deltas and returns full text');
+   assert(seen2 && /论文相关段落/.test(seen2[0].content) && seen2.some(m=>m.content==='先前的回答ZZZ'),'streaming explain keeps paper context + history');
+   console.log('explainSelectionText + stream grounding: OK');
+ }
+
+ // getUserAnnotations: reads highlights/underlines/notes with page + comment
+ { const att={ getAnnotations:()=>[
+     {annotationType:"highlight",annotationText:"vision encoder",annotationComment:"",annotationPageLabel:"3"},
+     {annotationType:"note",annotationText:"",annotationComment:"关键结论",annotationPageLabel:"9"},
+     {annotationType:"image",annotationText:"x",annotationComment:"",annotationPageLabel:"1"} ] };
+   const ua=await A.getUserAnnotations(att);
+   assert(ua.length===2,'getUserAnnotations skips image, keeps hl+note');
+   assert(/p3/.test(ua[0])&&/vision encoder/.test(ua[0]),'annotation carries page + text');
+   assert(/p9/.test(ua[1])&&/关键结论/.test(ua[1]),'note annotation carries comment');
+   console.log('getUserAnnotations: OK');
+ }
+
+ // saveNoteFromText: appends to an existing AI-tagged note, else creates one
+ { let created=null, saved=0; const notes=[];
+   const fakeNote=()=>({ _note:"", _tags:[], setNote(h){this._note=h;}, getNote(){return this._note;}, addTag(t){this._tags.push(t);}, hasTag(t){return this._tags.includes(t);}, async saveTx(){saved++;} , isAttachment:()=>false, isRegularItem:()=>true });
+   const parent={ libraryID:1, isAttachment:()=>false, isRegularItem:()=>true, getDisplayTitle:()=>"Paper", getNotes:()=>notes.map((n,i)=>i) };
+   const origItem=ctx.Zotero.Item, origGet=ctx.Zotero.Items.get;
+   ctx.Zotero.Item=function(){ const n=fakeNote(); created=n; return n; };
+   ctx.Zotero.Items.get=(i)=>notes[i];
+   const st3={ item:parent, attachment:{key:'K',id:7}, blocks };
+   await A.saveNoteFromText(st3, "**要点** [B5]\n- a\n- b", "问题?");
+   assert(created && created._tags.includes("AI Reader"),'new AI note tagged');
+   assert(/<h1>/.test(created._note)&&/要点/.test(created._note),'note has title + content');
+   notes.push(created); // now an AI note exists
+   const firstLen=created._note.length;
+   await A.saveNoteFromText(st3, "第二条回答", null);
+   assert(created._note.length>firstLen && /<hr/.test(created._note),'second save appends to existing note');
+   ctx.Zotero.Item=origItem; ctx.Zotero.Items.get=origGet;
+   console.log('saveNoteFromText append/create: OK');
+ }
+
  // retrieval context (TF-IDF): returns block-tagged text relevant to query
  const rc=A.buildRetrievedContext(blocks, 'vision encoder pretraining');
  assert(rc.includes('[B')&&rc.length>0,'retrieved context non-empty');
