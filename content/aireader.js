@@ -35,13 +35,13 @@ AIReader = {
   log(msg) { Zotero.debug("[AIReader] " + msg); },
 
   PRESETS: [
-    { label: "总结全文", q: "请分【研究问题 / 方法 / 主要发现 / 结论与意义 / 局限】五部分，结构化总结这篇论文。", broad: true },
-    { label: "总结(含图表)", q: "结合正文与图表，分【研究问题 / 方法 / 主要发现(含关键图表) / 结论与意义 / 局限】结构化总结这篇论文。", broad: true, withFigures: true },
+    { label: "总结全文", q: "请分【研究问题 / 方法 / 主要发现 / 结论与意义 / 局限】五部分，结构化总结这篇论文。最后额外用一个 ```svg 图直观呈现论文的整体脉络（问题→方法→发现→结论）。", broad: true },
+    { label: "总结(含图表)", q: "结合正文与图表，分【研究问题 / 方法 / 主要发现(含关键图表) / 结论与意义 / 局限】结构化总结这篇论文。最后额外用一个 ```svg 图直观呈现整体脉络与关键发现。", broad: true, withFigures: true },
     { label: "三行摘要", q: "用三行中文给出这篇论文的极简摘要：问题、方法、结论各一行。", broad: true },
     { label: "关键词", q: "列出本文 6-10 个关键术语，每个一句话解释，并用 [B<id>] 标注来源。", broad: true },
-    { label: "核心贡献", q: "这篇论文的核心贡献是什么？", broad: false },
+    { label: "核心贡献", q: "这篇论文的核心贡献是什么？最后额外用一个 ```svg 图把各项贡献及其关系直观呈现出来。", broad: false },
     { label: "方法", q: "它用了什么方法？简要说明。", broad: false },
-    { label: "主要结论", q: "主要结论或实验结果是什么？", broad: false },
+    { label: "主要结论", q: "主要结论或实验结果是什么？最后额外用一个 ```svg 图直观呈现关键结论/结果之间的关系。", broad: false },
     { label: "局限", q: "有哪些局限或未来工作？", broad: false },
     { label: "自动高亮", q: "从全文挑选 6-10 个最关键的句子，对每一句用 [[hl:<id>]] 标出；可附 [[note:<id>|一句话理由]]。逐条给出指令并简要说明理由。", broad: true, autoApply: true },
     { label: "总结我的高亮", q: "请总结我在这篇论文里高亮和批注的内容，并说明它们之间的联系与整体脉络。", broad: false, annos: true },
@@ -715,7 +715,7 @@ AIReader = {
       "3) 当用户要求划线/标注，或你认为某处值得高亮时，可输出指令：划线用 [[hl:<id>]]，加批注用 [[note:<id>|批注内容]]。这些会渲染成按钮由用户一键应用到 PDF。\n" +
       "4) 当用户想看某个图/表的视觉内容、或你需要看图才能准确解释时，输出 [[fig:<id>]]（id 为图/表块），会渲染该区域图像并交给多模态模型识图。\n" +
       "5) 若正文前附有【用户在 PDF 中的高亮与批注】，当用户问到『我的高亮/批注』时请优先结合这些内容回答。\n" +
-      "6) 需要用图示说明（流程、架构、时间线、关系、公式推导示意等）时，可直接画出来并会被渲染：用 ```mermaid 代码块画流程图/时序图/类图等，用 ```svg 画矢量图，用 ```html 画简单可视化。优先用 mermaid；仅在确实有助于理解时才画，不要为画而画。\n\n" +
+      "6) 需要用图示说明（流程、架构、时间线、关系等）时，请输出一个 ```svg 代码块，会被内联渲染成矢量图。要点：用 <rect>/<text>/<line>/<path>/<polygon> 等手绘；根 <svg> 必须带 viewBox 定义坐标系（不要写固定像素 width/height，会自适应容器宽度）；viewBox 宽度建议 ≤ 600，框与文字不要重叠、箭头对齐、字号适中；颜色用柔和填充。不要用 mermaid（本环境无法渲染，只会显示源码）。仅在确实有助于理解时才画。\n\n" +
       "论文内容：\n\n" + ctx;
   },
 
@@ -885,18 +885,25 @@ AIReader = {
       let full = "";
       const MAX_ROUNDS = deep ? 16 : 8;
       for (let round = 0; round < MAX_ROUNDS && !state.cancel; round++) {
-        let acc = "", lastR = 0;
+        let acc = "", lastR = 0, lastRendered = null;
         const turnEl = answerEl;
+        // Stream: once a diagram fence (```svg etc.) opens, hide its raw source and
+        // show a "正在绘制…" animation instead; keep rendering the prose before it.
+        const paint = (text, force) => {
+          const cut = this._artifactCut(text);
+          if (cut == null) { this._clearDrawing(turnEl); if (force || text !== lastRendered) { try { this.renderRich(state, turnEl, text); } catch (e) { turnEl.textContent = text; } lastRendered = text; } }
+          else { if (force || cut !== lastRendered) { try { this.renderRich(state, turnEl, cut); } catch (e) { turnEl.textContent = cut; } lastRendered = cut; } this._showDrawing(state, turnEl); }
+        };
         const res = await this._streamAnswer(messages, tools, (d) => {
           acc += d;
           const el = state.chatMsgs;
           const stick = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
           const now = Date.now();
-          if (now - lastR > 140) { lastR = now; try { this.renderRich(state, turnEl, acc); } catch (e) { turnEl.textContent = acc; } }
+          if (now - lastR > 140) { lastR = now; paint(acc); }
           this.setStatus(state, "生成中… " + acc.length + " 字", "busy");
           if (stick) el.scrollTop = el.scrollHeight;
         }, () => state.cancel, meta);
-        try { this.renderRich(state, turnEl, res.text || ""); } catch (e) { turnEl.textContent = res.text || ""; }
+        paint(res.text || "", true); // still hide any in-progress diagram source (final SVG is drawn by enhanceMessage below)
         if (res.calls && res.calls.length && !state.cancel) {
           this._pushAssistantToolTurn(fmt0, messages, { text: res.text, calls: res.calls });
           ensureToolLog();
@@ -989,7 +996,7 @@ AIReader = {
     while (tmp.firstChild) bubble.appendChild(tmp.firstChild);
     this._linkifyTokens(state, bubble);
     // Model-drawn diagrams render only on the FINAL pass (not mid-stream), so
-    // mermaid never runs on an incomplete fenced block and iframes aren't rebuilt per delta.
+    // an incomplete fenced block is never injected and SVG isn't rebuilt per delta.
     if (opts && opts.artifacts) { try { this._renderArtifacts(state, bubble); } catch (e) { this.log("artifacts: " + e); } }
   },
 
@@ -1007,40 +1014,30 @@ AIReader = {
     } catch (e) {}
   },
 
-  // ---- model-drawn diagrams (mermaid / svg / html) rendered in a SANDBOXED
-  // iframe so their scripts are isolated from the privileged Zotero window ----
-  _artifactSrcdoc(kind, code) {
-    const head = '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0}body{background:#fff;color:#111;font:13px/1.5 -apple-system,system-ui,"PingFang SC",sans-serif;padding:8px}svg,img{max-width:100%;height:auto}*{box-sizing:border-box}</style></head><body>';
-    const resize = '<scr' + 'ipt>function _h(){try{parent.postMessage({__aireaderH:document.documentElement.scrollHeight},"*")}catch(e){}}window.addEventListener("load",_h);setTimeout(_h,250);setTimeout(_h,900);try{new ResizeObserver(_h).observe(document.body)}catch(e){}</scr' + 'ipt>';
-    if (kind === "mermaid") {
-      return head + '<pre class="mermaid">' + this._escapeHTML(code) + "</pre>" +
-        '<scr' + 'ipt type="module">try{const m=(await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")).default;m.initialize({startOnLoad:false});await m.run();}catch(e){document.body.innerHTML=\'<pre style="color:#b00;white-space:pre-wrap">Mermaid 渲染失败（可能无网络）：\\n\'+' + JSON.stringify(this._escapeHTML(code)) + '+\'</pre>\';}</scr' + 'ipt>' +
-        resize + "</body></html>";
-    }
-    // svg / html: injected as-is (rendered inside the sandbox)
-    return head + code + resize + "</body></html>";
-  },
-  _artifactIframe(doc, kind, code) {
-    const wrap = this._el(doc, "div", "aireader-artifact");
-    const frame = doc.createElementNS("http://www.w3.org/1999/xhtml", "iframe");
-    frame.setAttribute("sandbox", "allow-scripts"); // no allow-same-origin → cannot touch Zotero
-    frame.setAttribute("scrolling", "no");
-    frame.className = "aireader-artifact-frame";
-    frame.style.cssText = "width:100%;height:300px;border:0;display:block;background:#fff;";
-    frame.setAttribute("srcdoc", this._artifactSrcdoc(kind, code));
+  // ---- model-drawn diagrams (svg / html) ----
+  // Diagrams are rendered by injecting the model's SVG/HTML inline, after a
+  // diagram-sanitize pass (strips script/iframe/foreignObject/on*/javascript:
+  // but KEEPS <style> for fidelity). This is the same innerHTML path that renders
+  // Markdown, so it works where iframes don't: Zotero's privileged XUL-hosted
+  // panel renders neither a sandboxed srcdoc iframe nor a same-origin local-page
+  // iframe (both stayed blank), and injecting a <script> into the window is CSP-
+  // blocked — so a DOM-dependent lib like mermaid can't run here at all. We steer
+  // the model to SVG; a stray ```mermaid block degrades to readable source.
+  _sanitizeArtifact(root) {
     try {
-      const win = doc.defaultView;
-      if (win) win.addEventListener("message", (e) => {
-        if (e.source === frame.contentWindow && e.data && typeof e.data.__aireaderH === "number") {
-          frame.style.height = Math.min(Math.max(e.data.__aireaderH + 6, 60), 680) + "px";
+      root.querySelectorAll("script,iframe,object,embed,link,meta,base,form,input,button,foreignObject").forEach((n) => n.remove());
+      root.querySelectorAll("*").forEach((el) => {
+        for (const a of Array.from(el.attributes)) {
+          const n = a.name.toLowerCase();
+          if (n.startsWith("on")) el.removeAttribute(a.name);
+          if ((n === "href" || n === "src" || n === "xlink:href") && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
         }
       });
     } catch (e) {}
-    wrap.appendChild(frame);
-    return wrap;
   },
-  // Replace ```mermaid / ```svg / ```html fenced code blocks with sandboxed
-  // artifact iframes. Runs only on the FINAL render (not mid-stream).
+  // Replace ```svg / ```html fenced blocks with inline diagrams; a ```mermaid
+  // block (which can't render here) shows readable, wrapping source instead.
+  // Runs only on the FINAL render (not mid-stream).
   _renderArtifacts(state, root) {
     const doc = state.doc;
     let codes;
@@ -1055,8 +1052,50 @@ AIReader = {
       if ((kind === "html") && !/[<&]/.test(src)) return;
       const pre = code.parentNode;
       if (!pre || !pre.parentNode) return;
-      try { pre.parentNode.replaceChild(this._artifactIframe(doc, kind, src), pre); } catch (e) { this.log("artifact replace: " + e); }
+      try {
+        const wrap = this._el(doc, "div", "aireader-artifact aireader-artifact-" + kind);
+        if (kind === "mermaid") {
+          wrap.appendChild(this._el(doc, "div", "aireader-artifact-src", src)); // readable source (no DOM-lib renderer available)
+        } else {
+          wrap.innerHTML = src;
+          this._sanitizeArtifact(wrap); // strip executable bits, keep <style> for SVG fidelity
+          if (kind === "svg") { try { this._fitSvg(wrap); } catch (e) {} }
+        }
+        pre.parentNode.replaceChild(wrap, pre);
+      } catch (e) { this.log("artifact replace: " + e); }
     });
+  },
+
+  // Make an injected SVG fluid: drop the fixed pixel width/height (which blew the
+  // panel wider than the bubble), synthesize a viewBox from them when missing so
+  // the aspect ratio is kept, and cap it to the container width.
+  _fitSvg(wrap) {
+    const svg = wrap.querySelector && wrap.querySelector("svg");
+    if (!svg) return;
+    const w = parseFloat(svg.getAttribute("width")), h = parseFloat(svg.getAttribute("height"));
+    if (!svg.getAttribute("viewBox") && w > 0 && h > 0) svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
+    try { svg.style.maxWidth = "100%"; svg.style.height = "auto"; } catch (e) {}
+  },
+
+  // "正在绘制…" placeholder shown while a diagram is still streaming (so the raw
+  // SVG source never flashes). Appended once; survives across throttled renders
+  // because we skip re-rendering the unchanged prose, keeping the spin animation.
+  _showDrawing(state, el) {
+    const last = el.lastChild;
+    if (last && last.classList && last.classList.contains("aireader-drawing")) return;
+    const d = this._el(state.doc, "div", "aireader-drawing", "正在绘制图示…");
+    el.appendChild(d);
+  },
+  _clearDrawing(el) {
+    try { const d = el.querySelector && el.querySelector(".aireader-drawing"); if (d) d.remove(); } catch (e) {}
+  },
+  // Prose that precedes the first diagram fence (```svg|html|mermaid|xml), or null
+  // if none has opened yet. Used to hide the diagram's raw source while streaming.
+  _artifactCut(text) {
+    const m = /```(?:svg|html|mermaid|xml)\b/i.exec(text || "");
+    return m ? text.slice(0, m.index) : null;
   },
 
   // Walk rendered text nodes and turn [B<id>] / [[hl|note|fig:id]] into elements.

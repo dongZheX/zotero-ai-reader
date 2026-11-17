@@ -542,31 +542,63 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  await A.navigateTo(7, posBlock);
  assert(opened && Number.isInteger(opened.loc.position.pageIndex),'navigate shape');
 
- // ---- model-drawn artifacts (mermaid / svg / html) srcdoc generation ----
- const mmd=A._artifactSrcdoc('mermaid','graph TD; A-->B');
- assert(/<pre class="mermaid">/.test(mmd),'mermaid wrapped in .mermaid pre');
- assert(mmd.includes('graph TD; A--&gt;B'),'mermaid source escaped into pre');
- assert(mmd.includes('mermaid@11'),'mermaid loader embedded');
- assert(mmd.includes('渲染失败'),'mermaid degrades gracefully on failure');
- assert(mmd.includes('__aireaderH'),'artifact posts its height to parent');
- const svg=A._artifactSrcdoc('svg','<svg viewBox="0 0 10 10"><rect/></svg>');
- assert(svg.includes('<svg viewBox="0 0 10 10">'),'svg injected verbatim for rendering');
- const htm=A._artifactSrcdoc('html','<b>hi</b>');
- assert(htm.includes('<b>hi</b>')&&htm.includes('<!doctype html>'),'html wrapped in sandbox doc');
- // _renderArtifacts swaps a fenced code block for a sandboxed iframe
- (function(){
-   const code=stubEl(); code.className='language-mermaid'; code.textContent='graph TD; X-->Y';
-   const pre=stubEl(); pre.tagName='pre'; pre.appendChild(code);
-   const root=stubEl(); root.appendChild(pre);
-   code.parentNode=pre; pre.parentNode=root;
+ // ---- model-drawn artifacts (mermaid / svg / html) rendered inline ----
+ // helper: run _renderArtifacts over one fenced block, return the replacement node
+ function renderArtifact(cls, srcText){
+   const code=stubEl(); code.className=cls; code.textContent=srcText;
+   const pre=stubEl(); pre.tagName='pre'; pre.appendChild(code); code.parentNode=pre;
+   const root=stubEl(); root.appendChild(pre); pre.parentNode=root;
    root.querySelectorAll=(sel)=> sel==='pre > code' ? [code] : [];
-   let replaced=null;
-   root.replaceChild=(nw,old)=>{ replaced={nw,old}; };
-   A._renderArtifacts({doc}, root);
-   assert(replaced && replaced.old===pre,'fenced mermaid block replaced');
-   assert(replaced.nw && collect(replaced.nw,'aireader-artifact-frame').length===1,'replacement contains sandbox iframe');
- })();
- console.log('artifacts (mermaid/svg/html srcdoc + fenced swap): OK');
+   let replaced=null; root.replaceChild=(nw,old)=>{ replaced={nw,old}; };
+   A._renderArtifacts({doc,attachment:{id:7,key:'K'}}, root);
+   return replaced;
+ }
+ // svg: injected inline into the wrapper (sanitize runs; stub keeps innerHTML)
+ { const r=renderArtifact('language-svg','<svg viewBox="0 0 10 10"><rect/></svg>');
+   assert(r && r.old.tagName==='pre','svg fenced block replaced');
+   assert(/aireader-artifact/.test(r.nw.className) && /<svg/.test(r.nw.innerHTML||''),'svg injected inline');
+ }
+ // html: injected inline
+ { const r=renderArtifact('language-html','<b>hi</b>');
+   assert(r && /<b>hi<\/b>/.test(r.nw.innerHTML||''),'html injected inline');
+ }
+ // mermaid can't render in this environment → show readable, wrapping source
+ { const r=renderArtifact('language-mermaid','graph TD; X-->Y');
+   const srcDiv=collect(r.nw,'aireader-artifact-src');
+   assert(srcDiv.length===1 && srcDiv[0].textContent==='graph TD; X-->Y','mermaid shown as wrapping source');
+ }
+ // the model is steered to SVG, and the heavy mermaid lib / iframe page are gone
+ assert(/```svg/.test(A.systemPrompt('x')),'system prompt steers diagrams to svg');
+ assert(!fs.existsSync(path.join(__dirname,'..','content','vendor','mermaid.min.js')),'heavy mermaid lib removed');
+ assert(!fs.existsSync(path.join(__dirname,'..','content','artifact.html')),'dead iframe render page removed');
+ // _sanitizeArtifact strips scripts/handlers but keeps <style> for SVG fidelity
+ { const el=stubEl(); let removed=[];
+   el.querySelectorAll=(sel)=> sel.indexOf('script')>=0 ? [{remove(){removed.push('script');}}] : [{attributes:[{name:'onclick',value:'x'}],removeAttribute(n){removed.push('attr:'+n);}}];
+   A._sanitizeArtifact(el);
+   assert(removed.includes('script')&&removed.includes('attr:onclick'),'_sanitizeArtifact removes script + on* handlers');
+   assert(!/style/.test('script,iframe,object,embed,link,meta,base,form,input,button,foreignObject'),'<style> is NOT in the artifact strip list');
+ }
+ // a plain (non-artifact) code block is left untouched
+ assert(renderArtifact('language-python','print(1)')===null,'non-artifact code block not replaced');
+ // _artifactCut: hide the diagram source while streaming (returns prose before the fence)
+ assert(A._artifactCut('文字说明\n```svg\n<svg></svg>\n```')==='文字说明\n','_artifactCut returns prose before ```svg');
+ assert(A._artifactCut('前言\n```mermaid\ngraph')==='前言\n','_artifactCut handles an unclosed fence too');
+ assert(A._artifactCut('普通回答，无图')===null,'_artifactCut null when no diagram fence');
+ assert(A._artifactCut('```python\nx=1')===null,'_artifactCut ignores non-diagram code fences');
+ // _fitSvg: drop fixed px size, synthesize a viewBox, cap width (fixes overflow)
+ { const svg={ _attr:{width:'800',height:'600'}, getAttribute(n){return this._attr[n];}, setAttribute(n,v){this._attr[n]=v;}, removeAttribute(n){delete this._attr[n];}, style:{} };
+   const wrap={ querySelector:()=>svg };
+   A._fitSvg(wrap);
+   assert(svg._attr.viewBox==='0 0 800 600','_fitSvg synthesizes viewBox from width/height');
+   assert(svg._attr.width===undefined && svg._attr.height===undefined,'_fitSvg drops fixed px width/height');
+   assert(svg.style.maxWidth==='100%','_fitSvg caps svg to container width');
+ }
+ // summary presets ask for an SVG diagram by default
+ { const sum=A.PRESETS.find(p=>p.label==='总结全文'), tri=A.PRESETS.find(p=>p.label==='三行摘要');
+   assert(/```svg/.test(sum.q),'总结全文 preset requests an svg diagram');
+   assert(!/```svg/.test(tri.q),'三行摘要 stays text-only');
+ }
+ console.log('artifacts (inline svg/html, stream-hide source, fit-width, summary-draws): OK');
 
  // ---- web tools: web_search (Serper) + web_fetch ----
  // _htmlToText: strip markup, keep title + readable text
@@ -625,6 +657,7 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    assert(/\.aireader-msg-assistant \.aireader-bubble \* \{[^}]*min-width: 0/.test(css),'bubble descendants pinned to min-width:0 (overflow safety net)');
    assert(/\.aireader-msg \{[^}]*min-width: 0/.test(css),'.aireader-msg has min-width:0');
    assert(/\.aireader-answer \{[^}]*overflow-wrap: anywhere/.test(css),'.aireader-answer wraps long tokens');
+   assert(/\.aireader-rich[^{]*\{ white-space: normal/.test(css),'rich content stays white-space:normal (no mid-stream blank gaps)');
    console.log('layout overflow safety net present: OK');
  }
 

@@ -7,7 +7,7 @@
 <p>Read papers with an AI assistant inside Zotero's item pane. Answers cite the source, and a click on any page badge jumps back to that spot in the PDF.</p>
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.8.1-3b7ddd?style=flat-square"/>
+  <img alt="version" src="https://img.shields.io/badge/version-0.8.2-3b7ddd?style=flat-square"/>
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7 · 8 · 10 · 11-cc2936?style=flat-square&logo=zotero&logoColor=white"/>
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
@@ -43,7 +43,7 @@ Two things make it more than a chat box:
 | **Agentic read & annotate** | One click (**✨ 通读并标注**) sends the agent through the whole paper and applies colour-coded highlights + notes for the key points — contribution (yellow), method (green), result (blue), limitation (red), key term (purple). Fully automatic, de-duplicated and idempotent, with a live progress log and a one-click **undo this run**. |
 | **Figure & table vision** | Render a figure or table region to an image and send it to a multimodal model, instead of reading only the caption text. |
 | **Web search & fetch** | The model can call `web_search` (Google via Serper — set a Serper key in settings) and `web_fetch` (read a page as text) to check background, recent work, or terms beyond the paper. `web_fetch` works without a key; `web_search` only appears once a Serper key is set. |
-| **Inline diagrams** | The model can draw with fenced ` ```mermaid `, ` ```svg `, or ` ```html ` blocks; they render inline in a sandboxed iframe (scripts isolated from Zotero), with graceful fallback to source. |
+| **Inline diagrams (SVG)** | The model can draw a diagram with a fenced ` ```svg ` block; it renders inline (sanitized, scaled to fit the panel). The raw source is hidden while it streams — you see a "正在绘制…" animation, then the finished figure. Summary presets (总结全文 / 含图表 / 核心贡献 / 主要结论) ask for a diagram by default. |
 | **Selection popup** | Select text in the reader to quote it into the sidebar, explain it (streaming, with a copy button and a one-click "write to PDF annotation"), or translate it. Explanations see the paper context and the recent conversation. |
 | **Your notes as context** | Reads your existing highlights and notes so you can ask "summarize my highlights" or "answer based on my notes". |
 | **Persistence** | Conversation history is saved per attachment and restored next time. Save any conversation as a Zotero note. |

@@ -7,7 +7,7 @@
 <p>在 Zotero 的条目面板里用 AI 读论文。回答带出处，点一下页码徽标就跳回 PDF 对应的位置。</p>
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.8.1-3b7ddd?style=flat-square"/>
+  <img alt="version" src="https://img.shields.io/badge/version-0.8.2-3b7ddd?style=flat-square"/>
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7 · 8 · 10 · 11-cc2936?style=flat-square&logo=zotero&logoColor=white"/>
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
@@ -43,7 +43,7 @@
 | **Agent 通读并标注** | 一键（**✨ 通读并标注**）让 agent 读完整篇论文，自动按类别打上**彩色**高亮+批注——贡献（黄）、方法（绿）、结果（蓝）、局限（红）、关键概念（紫）。全自动、去重且幂等，面板实时显示进度，并提供一键**撤销本次标注**。 |
 | **图表视觉解读** | 把图或表的区域渲染成图像交给多模态模型，而不是只读 caption 文本。 |
 | **联网搜索与抓取** | 模型可调用 `web_search`（Google via Serper，需在设置里填 Serper Key）和 `web_fetch`（把网页读成正文）来核对论文之外的背景、最新进展或术语。`web_fetch` 无需 Key；`web_search` 仅在填入 Serper Key 后出现。 |
-| **对话内画图** | 模型可用 ` ```mermaid `、` ```svg `、` ```html ` 代码块画图，直接在对话里用沙箱 iframe 渲染（脚本与 Zotero 隔离），失败时优雅回退为源码。 |
+| **对话内画图（SVG）** | 模型可用 ` ```svg ` 代码块画示意图，直接内联渲染（已净化、自动缩放适配面板宽度）。生成时**不显示源码**，只显示「正在绘制…」动画，完成后呈现图形。总结类预设（总结全文 / 含图表 / 核心贡献 / 主要结论）默认附带一张示意图。 |
 | **选中弹窗** | 在阅读器里选中文字，可以引用到侧栏、解释（流式，带复制按钮和一键「写入 PDF 批注」）、或翻译。解释时会参考论文上下文和最近的对话。 |
 | **你的标注作为上下文** | 读取你已有的高亮和笔记，于是可以问「总结我的高亮」「基于我的批注回答」。 |
 | **持久化** | 对话历史按附件保存，下次打开自动恢复。任意一段对话可存为 Zotero 笔记。 |
