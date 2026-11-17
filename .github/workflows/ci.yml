@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax check all JS
+        run: |
+          for f in bootstrap.js prefs.js content/aireader.js content/preferences.js; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+
+      - name: Scan for leaked secrets
+        run: |
+          # Fail the build if an API key / AK-SK pattern is committed.
+          if grep -rnEi "sk-[A-Za-z0-9]{20,}" . \
+               --exclude-dir=.git --exclude-dir=node_modules; then
+            echo "::error::Possible secret committed — see matches above."
+            exit 1
+          fi
+          echo "No secrets found."
+
+# NOTE: the full behavioural simulation (test/sim.js) is run locally — it reads
+# a real Zotero structured-text (SDT) cache that isn't portable into CI. Run it
+# before every release with:  node test/sim.js   # → ALL OK

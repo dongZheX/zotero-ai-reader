@@ -7,7 +7,7 @@
 <p>在 Zotero 的条目面板里用 AI 读论文。回答带出处，点一下页码徽标就跳回 PDF 对应的位置。</p>
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.7.2-3b7ddd?style=flat-square"/>
+  <img alt="version" src="https://img.shields.io/badge/version-0.8.0-3b7ddd?style=flat-square"/>
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7 · 8 · 10 · 11-cc2936?style=flat-square&logo=zotero&logoColor=white"/>
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
@@ -38,6 +38,7 @@
 | **带上下文的对话** | 整篇论文作为上下文注入。流式 Markdown 输出，用 `marked` + KaTeX 渲染粗体、列表、表格、代码块，以及行内 `$…$` 和块级 `$$…$$` 公式。每条消息底部显示 token 与 context 用量。 |
 | **点击溯源** | 回答里的 `[B<id>]` 渲染成页码徽标，点一下跳转并高亮阅读器里对应的文本块。 |
 | **AI 写标注** | 模型建议划线/批注，你一键应用为原生标注。`✕` 会把它在那个位置加的标注全部删掉。 |
+| **Agent 通读并标注** | 一键（**✨ 通读并标注**）让 agent 读完整篇论文，自动按类别打上**彩色**高亮+批注——贡献（黄）、方法（绿）、结果（蓝）、局限（红）、关键概念（紫）。全自动、去重且幂等，面板实时显示进度，并提供一键**撤销本次标注**。 |
 | **图表视觉解读** | 把图或表的区域渲染成图像交给多模态模型，而不是只读 caption 文本。 |
 | **选中弹窗** | 在阅读器里选中文字，可以引用到侧栏、解释（流式，带复制按钮和一键「写入 PDF 批注」）、或翻译。解释时会参考论文上下文和最近的对话。 |
 | **你的标注作为上下文** | 读取你已有的高亮和笔记，于是可以问「总结我的高亮」「基于我的批注回答」。 |

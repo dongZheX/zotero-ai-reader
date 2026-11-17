@@ -9,8 +9,23 @@ AIReader = {
   _panels: new Map(),      // attachment.key -> state (latest live panel)
   _chatStore: new Map(),   // attachment.key -> [{role, content}]
   _blockStore: new Map(),  // attachment.key -> blocks[]
+  _histSummary: new Map(), // attachment.key -> rolling summary of compacted older turns
+  _popupCache: null,       // {text, raw, showActions} — survives reader popup re-render on scroll
+  _deepRead: false,        // deep-read mode: traverse the whole paper + use vision aggressively
 
   HILITE_COLOR: "#ffd400",
+  // Agentic reading categories → Zotero's native annotation palette.
+  CATEGORY_COLORS: {
+    contribution: "#ffd400", // yellow
+    method: "#5fb236",       // green
+    result: "#2ea8e5",       // blue
+    limitation: "#ff6666",   // red
+    keyterm: "#a28ae5",      // purple
+  },
+  CATEGORY_LABELS: {
+    contribution: "贡献", method: "方法", result: "结果", limitation: "局限", keyterm: "关键概念",
+  },
+  colorForCategory(cat) { return this.CATEGORY_COLORS[cat] || this.HILITE_COLOR; },
 
   init({ id, version, rootURI }) {
     this.id = id; this.version = version; this.rootURI = rootURI;
@@ -21,6 +36,7 @@ AIReader = {
 
   PRESETS: [
     { label: "总结全文", q: "请分【研究问题 / 方法 / 主要发现 / 结论与意义 / 局限】五部分，结构化总结这篇论文。", broad: true },
+    { label: "总结(含图表)", q: "结合正文与图表，分【研究问题 / 方法 / 主要发现(含关键图表) / 结论与意义 / 局限】结构化总结这篇论文。", broad: true, withFigures: true },
     { label: "三行摘要", q: "用三行中文给出这篇论文的极简摘要：问题、方法、结论各一行。", broad: true },
     { label: "关键词", q: "列出本文 6-10 个关键术语，每个一句话解释，并用 [B<id>] 标注来源。", broad: true },
     { label: "核心贡献", q: "这篇论文的核心贡献是什么？", broad: false },
@@ -171,12 +187,27 @@ AIReader = {
     body.classList.add("aireader-root");
 
     const top = this._el(doc, "div", "aireader-top");
+    const agentBtn = this._el(doc, "div", "aireader-top-btn aireader-top-agent", "✨ 通读并标注");
+    agentBtn.title = "让 AI 通读全文，自动按类别高亮+批注（可一键撤销）";
+    agentBtn.addEventListener("click", () => { const st = this._bodyState.get(body); if (st) this.agentAnnotate(st); });
+    // deep-read toggle: when on, the model traverses the whole paper and reads
+    // figures aggressively (more tool calls, slower, more thorough).
+    const deepBtn = this._el(doc, "div", "aireader-top-btn aireader-deep", "深读 " + (this._deepRead ? "开" : "关"));
+    deepBtn.title = "深读模式：让模型遍历所有章节、主动读图，覆盖更全（更慢更贵）";
+    if (this._deepRead) deepBtn.classList.add("aireader-deep-on");
+    deepBtn.addEventListener("click", () => {
+      this._deepRead = !this._deepRead;
+      deepBtn.textContent = "深读 " + (this._deepRead ? "开" : "关");
+      deepBtn.classList.toggle("aireader-deep-on", this._deepRead);
+    });
     const noteBtn = this._el(doc, "div", "aireader-top-btn", "存为笔记");
     noteBtn.title = "把当前对话存为 Zotero 笔记";
     noteBtn.addEventListener("click", () => this.saveNote(body));
     const gear = this._el(doc, "div", "aireader-gear", "⚙");
     gear.title = "Settings";
     gear.addEventListener("click", () => Zotero.Utilities.Internal.openPreferences(AIReader._prefPaneID));
+    top.appendChild(agentBtn);
+    top.appendChild(deepBtn);
     top.appendChild(noteBtn);
     top.appendChild(this._el(doc, "div", "aireader-foot-spacer"));
     top.appendChild(gear);
@@ -191,7 +222,7 @@ AIReader = {
     const chips = this._el(doc, "div", "aireader-chips");
     for (const p of this.PRESETS) {
       const c = this._el(doc, "button", "aireader-chip", p.label);
-      c.addEventListener("click", () => this.onChatSend(body, p.q, { broad: p.broad, autoApply: p.autoApply, annos: p.annos }));
+      c.addEventListener("click", () => this.onChatSend(body, p.q, { broad: p.broad, autoApply: p.autoApply, annos: p.annos, withFigures: p.withFigures }));
       chips.appendChild(c);
     }
     body.appendChild(chips);
@@ -454,25 +485,118 @@ AIReader = {
     const struct = await reader.materialize();
     const pages = (struct.catalog && struct.catalog.pages) || [];
     const blocks = [];
-    let id = 0;
+    const ref = { id: 0 };
     for (const node of struct.content) {
       if (node.flowClass === "excluded") continue;
-      let text = this.blockText(node).replace(/\s+/g, " ").trim();
-      if (!text && node.type !== "image") continue;
-      if (text.length > 2000) text = text.slice(0, 2000) + "…";
-      const rectsByPage = {};
-      for (const pr of (node.anchor && node.anchor.pageRects) || []) { const pi = pr[0]; (rectsByPage[pi] = rectsByPage[pi] || []).push([pr[1], pr[2], pr[3], pr[4]]); }
-      const pageIdxs = Object.keys(rectsByPage).map(Number).sort((a, b) => a - b);
-      let position = null, pageLabel = "?", pageHeight = 792;
-      if (pageIdxs.length) {
-        const pi = pageIdxs[0];
-        position = { pageIndex: pi, rects: rectsByPage[pi] };
-        pageLabel = (pages[pi] && pages[pi].label) || String(pi + 1);
-        const vr = pages[pi] && pages[pi].viewRect; if (vr) pageHeight = vr[3] - vr[1];
-      }
-      blocks.push({ id: id++, type: node.type, text, position, pageLabel, pageHeight });
+      this._emitBlocks(node, pages, blocks, ref);
     }
     return blocks;
+  },
+
+  // Page label + height helper.
+  _pageMeta(pages, pi) {
+    const pageLabel = (pages[pi] && pages[pi].label) || String(pi + 1);
+    const vr = pages[pi] && pages[pi].viewRect;
+    const pageHeight = vr ? (vr[3] - vr[1]) : 792;
+    return { pageLabel, pageHeight };
+  },
+
+  // Walk a content node's leaf spans and return ordered segments carrying both
+  // the text AND the per-segment rect from the leaf's textMap
+  // ([rot, pageIndex, x1, y1, x2, y2, …]). This is what lets us annotate/cite a
+  // single SENTENCE instead of the whole paragraph.
+  _leafSegments(node) {
+    const segs = [];
+    const walk = (n) => {
+      if (typeof n.text === "string") {
+        const tm = n.anchor && n.anchor.textMap;
+        let parsed = null; if (tm) { try { parsed = JSON.parse(tm); } catch (e) {} }
+        if (Array.isArray(parsed) && parsed.length) {
+          const rects = []; let pi = null;
+          for (const s of parsed) { if (Array.isArray(s) && s.length >= 6) { pi = s[1]; rects.push([s[2], s[3], s[4], s[5]]); } }
+          segs.push({ text: n.text, rects, pi });
+        } else {
+          segs.push({ text: n.text, rects: [], pi: null });
+        }
+        return;
+      }
+      if (Array.isArray(n.content)) for (const c of n.content) walk(c);
+    };
+    walk(node);
+    return segs;
+  },
+
+  // Split text into sentence-ish chunks with char offsets. Short trailing
+  // fragments (abbreviations like "al.", decimals, "2025).") are merged back so
+  // we don't cut a sentence at every dot.
+  _splitSentences(text) {
+    const out = [];
+    const re = /[^.!?。！？]*[.!?。！？]+|[^.!?。！？]+$/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (m[0] === "") { re.lastIndex++; continue; }
+      out.push({ text: m[0], start: m.index, end: m.index + m[0].length });
+    }
+    const merged = [];
+    for (const s of out) {
+      const t = s.text.trim();
+      if (merged.length && (t.length < 20 || /^[a-z0-9)\]]/.test(t))) {
+        const p = merged[merged.length - 1]; p.text += s.text; p.end = s.end;
+      } else merged.push({ text: s.text, start: s.start, end: s.end });
+    }
+    return merged.length ? merged : [{ text, start: 0, end: text.length }];
+  },
+
+  // Emit block(s) for one content node. Paragraphs are split into sentence-level
+  // blocks (each with its own rects); headings / figures / rectless nodes stay a
+  // single block (old behaviour).
+  _emitBlocks(node, pages, blocks, ref) {
+    const norm = (t) => t.replace(/\s+/g, " ").trim();
+    const push = (type, text, pi, rects) => {
+      let position = null, pageLabel = "?", pageHeight = 792;
+      if (pi != null && rects && rects.length) {
+        const meta = this._pageMeta(pages, pi); pageLabel = meta.pageLabel; pageHeight = meta.pageHeight;
+        position = { pageIndex: pi, rects };
+      }
+      let t = text; if (t.length > 2000) t = t.slice(0, 2000) + "…";
+      blocks.push({ id: ref.id++, type, text: t, position, pageLabel, pageHeight });
+    };
+
+    // figures/images and headings: keep whole, position from node.anchor.pageRects
+    const wholeRects = {};
+    for (const pr of (node.anchor && node.anchor.pageRects) || []) { (wholeRects[pr[0]] = wholeRects[pr[0]] || []).push([pr[1], pr[2], pr[3], pr[4]]); }
+    const wholePages = Object.keys(wholeRects).map(Number).sort((a, b) => a - b);
+    const wholePi = wholePages.length ? wholePages[0] : null;
+
+    if (node.type === "image" || node.type === "heading" || node.type === "math" || node.type === "table") {
+      const text = norm(this.blockText(node));
+      if (!text && node.type !== "image") return;
+      push(node.type, text, wholePi, wholePi != null ? wholeRects[wholePi] : null);
+      return;
+    }
+
+    // paragraph: split into sentences using per-segment rects
+    const segs = this._leafSegments(node);
+    const haveRects = segs.some((s) => s.rects.length);
+    const full = segs.map((s) => s.text).join("");
+    if (!norm(full)) return;
+    if (!haveRects) { push(node.type || "paragraph", norm(full), wholePi, wholePi != null ? wholeRects[wholePi] : null); return; }
+
+    // char-offset spans per segment
+    const spans = []; let pos = 0;
+    for (const s of segs) { spans.push({ start: pos, end: pos + s.text.length, seg: s }); pos += s.text.length; }
+    for (const sent of this._splitSentences(full)) {
+      const t = norm(sent.text);
+      if (!t) continue;
+      // segments overlapping this sentence's char range
+      const hit = spans.filter((sp) => sp.end > sent.start && sp.start < sent.end && sp.seg.rects.length);
+      if (!hit.length) { push(node.type || "paragraph", t, null, null); continue; }
+      // dominant page = page of the first hit segment; keep only its rects
+      let pi = null; for (const h of hit) { if (h.seg.pi != null) { pi = h.seg.pi; break; } }
+      const rects = [];
+      for (const h of hit) { if (h.seg.pi === pi) for (const r of h.seg.rects) rects.push(r); }
+      push(node.type || "paragraph", t, pi, rects);
+    }
   },
 
   async extractBlocksFallback(attachmentID) {
@@ -512,6 +636,25 @@ AIReader = {
     return lines.join("\n") + this._figIndex(blocks);
   },
 
+  // Broad context that survives long papers: if the whole body fits the budget,
+  // use it all; otherwise keep the beginning (abstract/intro) AND the end
+  // (conclusion) and mark the omitted middle — instead of a hard cut that drops
+  // the entire back half of the paper.
+  buildContextBounded(blocks, maxChars) {
+    maxChars = maxChars || Number(this.getPref("maxChars")) || 60000;
+    const text = (blocks || []).filter((b) => b.type !== "image" && b.type !== "math" && b.text);
+    const lineOf = (b) => "[B" + b.id + " p" + b.pageLabel + "] " + b.text;
+    const all = text.map(lineOf);
+    const sum = all.reduce((s, l) => s + l.length + 1, 0);
+    if (sum <= maxChars) return all.join("\n") + this._figIndex(blocks);
+    const headBudget = Math.floor(maxChars * 0.6), tailBudget = maxChars - headBudget;
+    const head = []; let ht = 0;
+    for (const b of text) { const l = lineOf(b); if (ht + l.length > headBudget) break; head.push(l); ht += l.length + 1; }
+    const tail = []; let tt = 0;
+    for (let i = text.length - 1; i >= 0; i--) { const l = lineOf(text[i]); if (tt + l.length > tailBudget) break; tail.unshift(l); tt += l.length + 1; }
+    return head.join("\n") + "\n\n…（中间内容略，可在对话中追问细节）…\n\n" + tail.join("\n") + this._figIndex(blocks);
+  },
+
   tokenize(s) {
     const out = [];
     const low = (s || "").toLowerCase();
@@ -545,6 +688,14 @@ AIReader = {
     for (const b of blocks) if (b.type === "heading") chosen.add(b.id); // keep structure
     scored.sort((a, b) => b.s - a.s);
     for (const { id, s } of scored) { if (s <= 0) break; chosen.add(id); }
+    // Headings are always kept for structure, so a low-signal query (a short or
+    // CJK query against an English paper → all scores 0) can leave ONLY headings
+    // chosen. That would feed the model a table of contents with no prose and
+    // make it refuse ("只有章节目录和图表索引，没有正文"). If too few BODY blocks
+    // actually matched, fall back to the full bounded context instead.
+    let bodyHits = 0;
+    for (const b of blocks) if (chosen.has(b.id) && b.type !== "heading" && b.type !== "image" && b.type !== "math" && b.text) bodyHits++;
+    if (bodyHits < 5) return this.buildContextBounded(blocks, maxChars);
     const lines = []; let total = 0;
     for (const b of blocks) {
       if (!chosen.has(b.id) || b.type === "image" || b.type === "math") continue;
@@ -552,7 +703,7 @@ AIReader = {
       if (total + line.length > maxChars) break;
       lines.push(line); total += line.length + 1;
     }
-    if (lines.length < 3) return this.buildContext(blocks); // fall back if query too sparse
+    if (lines.length < 3) return this.buildContextBounded(blocks, maxChars); // fall back if query too sparse
     return lines.join("\n") + this._figIndex(blocks);
   },
 
@@ -611,16 +762,16 @@ AIReader = {
     });
 
     // Apply-all when the answer contains highlight/note directives.
-    const dCount = (fullText.match(/\[\[(?:hl|note):\d+/g) || []).length;
+    const dCount = (fullText.match(/\[\[(?:hl|note):B?\d+/g) || []).length;
     if (dCount > 0) {
       const applyAll = mkAction("应用全部划线 (" + dCount + ")");
       applyAll.addEventListener("click", async () => {
         if (applyAll._done || applyAll._busy) return; // avoid duplicate highlights on repeat clicks
         applyAll._busy = true;
         applyAll.textContent = "应用中…";
-        const n = await this.autoApplyDirectives(state, fullText);
-        applyAll.textContent = n ? ("✓ 已应用 " + n + " 处") : "未识别到";
-        applyAll._done = n > 0; applyAll._busy = false;
+        const { count } = await this.autoApplyDirectives(state, fullText);
+        applyAll.textContent = count ? ("✓ 已应用 " + count + " 处") : "未识别到";
+        applyAll._done = count > 0; applyAll._busy = false;
       });
     }
     msg.appendChild(row);
@@ -637,6 +788,24 @@ AIReader = {
       }
       msg.appendChild(fups);
     }
+  },
+
+  // Keep long conversations from silently losing their early turns: once the
+  // history grows past TRIGGER, fold the older turns into one rolling summary
+  // (stored per attachment) and keep only the most recent KEEP turns verbatim.
+  async _compactHistory(key, hist) {
+    const KEEP = 12, TRIGGER = 20;
+    if (!hist || hist.length < TRIGGER) return;
+    const older = hist.splice(0, hist.length - KEEP);
+    const prev = this._histSummary.get(key) || "";
+    const convo = older.map((m) => (m.role === "user" ? "用户：" : "助手：") + m.content).join("\n");
+    try {
+      const sum = await this.callLLM([
+        { role: "system", content: "把以下对话压缩成要点笔记：保留已得出的结论、用户已问过的问题、表达过的偏好。简洁中文，分条。" },
+        { role: "user", content: (prev ? "已有要点：\n" + prev + "\n\n新增对话：\n" : "") + convo },
+      ]);
+      this._histSummary.set(key, (sum || "").trim());
+    } catch (e) { this.log("compact error: " + e); hist.unshift.apply(hist, older); }
   },
 
   _regen(state, msg, question) {
@@ -671,41 +840,82 @@ AIReader = {
     const meta = {};
     try {
       await this.ensureBlocks(state);
-      let ctx = opts.broad ? this.buildContext(state.blocks) : this.buildRetrievedContext(state.blocks, text);
+      let ctx = opts.broad ? this.buildContextBounded(state.blocks) : this.buildRetrievedContext(state.blocks, text);
       if (opts.annos) {
         const ua = await this.getUserAnnotations(state.attachment);
         if (ua.length) ctx = "【用户在 PDF 中的高亮与批注】（按出现顺序，优先结合这些回答）：\n" + ua.join("\n") + "\n\n——\n\n论文正文：\n" + ctx;
         else this.setStatus(state, "这篇论文还没有你的高亮/批注。", "muted");
       }
+      if (opts.withFigures) {
+        this.setStatus(state, "正在识读图表…", "busy");
+        try { const fd = await this._figureDigest(state, 2); if (fd) ctx = fd + "——\n\n论文正文：\n" + ctx; } catch (e) { this.log("withFigures: " + e); }
+      }
       meta.ctxChars = ctx.length;
       this.setStatus(state, "生成中…", "busy");
+      // Fold older turns into a rolling summary so long chats don't lose their
+      // early context when we slice to the most recent turns.
+      await this._compactHistory(key, hist);
+      const sumNote = this._histSummary.get(key);
+      const deep = !!this._deepRead;
+      const toolNote = "\n\n上面的论文正文可能是节选。你可以调用工具查阅更多内容：list_sections 看章节结构；read_section 读取某一章拿到每句 id；" +
+        "list_figures 列出图表；view_figure 识读某张图/表的视觉内容；highlight 高亮某个句子 id（给 category 和一句话 reason）。" +
+        (deep
+          ? "【深读模式】回答前请主动用 list_sections + read_section 读取所有相关章节，并对相关图/表 view_figure，确保基于充分证据作答。"
+          : "当注入的正文不足以准确回答、或问题涉及具体数据/图表时，请主动调用 read_section / view_figure 查阅后再答；普通问题可直接作答。");
+      const sys = this.systemPrompt(ctx) + toolNote + (sumNote ? "\n\n【早期对话要点】\n" + sumNote : "");
       // On regen (skipUser) the question is already the last history entry, so
       // don't append it again (that duplicated it in the prompt).
-      const messages = [{ role: "system", content: this.systemPrompt(ctx) }, ...hist.slice(-12)];
+      const messages = [{ role: "system", content: sys }, ...hist.slice(-12)];
       if (!opts.skipUser) messages.push({ role: "user", content: text });
 
-      let acc = "", lastR = 0;
-      const full = await this.callLLMStream(messages, (d) => {
-        acc += d;
-        const el = state.chatMsgs;
-        // Only auto-follow if the user is already near the bottom; don't yank
-        // them back down while they're scrolling up to read earlier content.
-        const stick = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
-        const now = Date.now();
-        if (now - lastR > 140) { lastR = now; try { this.renderRich(state, bubble, acc); } catch (e) { bubble.textContent = acc; } }
-        this.setStatus(state, "生成中… " + acc.length + " 字", "busy");
-        if (stick) el.scrollTop = el.scrollHeight;
-      }, () => state.cancel, meta);
+      // Stream the answer; if the model issues tool calls mid-stream, execute
+      // them (shown as collapsible tool blocks) and continue — so tool use is a
+      // general capability of normal chat, not just the "通读并标注" button.
+      const fmt0 = this._fmt();
+      const tools = this._toolSchemas(fmt0);
+      const tc = { sections: this._buildSections(state.blocks), byId: new Map((state.blocks || []).map((b) => [b.id, b])), run: { keys: [], applied: [] }, tally: {}, reads: 0 };
+      const toolLog = this._el(state.doc, "div", "aireader-toollog"); let toolLogAdded = false; const grp = {};
+      const ensureToolLog = () => { if (!toolLogAdded) { bubble.appendChild(toolLog); toolLogAdded = true; } };
+      let answerEl = this._el(state.doc, "div", "aireader-answer"); bubble.appendChild(answerEl);
+      let full = "";
+      const MAX_ROUNDS = deep ? 16 : 8;
+      for (let round = 0; round < MAX_ROUNDS && !state.cancel; round++) {
+        let acc = "", lastR = 0;
+        const turnEl = answerEl;
+        const res = await this._streamAnswer(messages, tools, (d) => {
+          acc += d;
+          const el = state.chatMsgs;
+          const stick = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
+          const now = Date.now();
+          if (now - lastR > 140) { lastR = now; try { this.renderRich(state, turnEl, acc); } catch (e) { turnEl.textContent = acc; } }
+          this.setStatus(state, "生成中… " + acc.length + " 字", "busy");
+          if (stick) el.scrollTop = el.scrollHeight;
+        }, () => state.cancel, meta);
+        try { this.renderRich(state, turnEl, res.text || ""); } catch (e) { turnEl.textContent = res.text || ""; }
+        if (res.calls && res.calls.length && !state.cancel) {
+          this._pushAssistantToolTurn(fmt0, messages, { text: res.text, calls: res.calls });
+          ensureToolLog();
+          this.setStatus(state, "调用工具中…", "busy");
+          const results = [];
+          for (const call of res.calls) { const r = await this._execTool(state, tc, call); this._appendToolGrouped(state, toolLog, grp, r.render); results.push({ id: call.id, name: call.name, output: r.output }); }
+          this._pushToolResults(fmt0, messages, results);
+          answerEl = this._el(state.doc, "div", "aireader-answer"); bubble.appendChild(answerEl);
+          try { state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight; } catch (e) {}
+          continue;
+        }
+        full = res.text || ""; break;
+      }
 
       bubble.classList.remove("aireader-streaming");
-      this.enhanceMessage(state, bubble, full);
+      this.enhanceMessage(state, answerEl, full);
       this.addAssistantActions(state, msg, full, text);
       this.addMetaLine(state, msg, meta, full);
+      if (tc.run.keys.length) { state._lastRun = tc.run; this._renderAgentSummary(state, bubble, tc.tally, tc.run.keys.length, false); }
       this.setStatus(state, "", "");
       if (!opts.skipUser) hist.push({ role: "user", content: text });
       hist.push({ role: "assistant", content: full });
       this.saveChat(state.attachment, hist).catch(() => {});
-      if (opts.autoApply) { const n = await this.autoApplyDirectives(state, full); this.setStatus(state, n ? ("已自动高亮 " + n + " 处。") : "未识别到可高亮的句子。", n ? "ok" : "muted"); }
+      if (opts.autoApply) { const { count } = await this.autoApplyDirectives(state, full); this.setStatus(state, count ? ("已自动高亮 " + count + " 处。") : "未识别到可高亮的句子。", count ? "ok" : "muted"); }
     } catch (e) {
       bubble.classList.remove("aireader-streaming");
       bubble.textContent = (state.cancel ? "（已停止）" : "Error: " + e.message);
@@ -792,7 +1002,7 @@ AIReader = {
   // Walk rendered text nodes and turn [B<id>] / [[hl|note|fig:id]] into elements.
   _linkifyTokens(state, root) {
     const doc = state.doc;
-    const re = /\[\[(?:hl|note|fig):\d+|\[B\d+\]/;
+    const re = /\[\[(?:hl|note|fig):B?\d+|\[B\d+(?:\s*[,，、\-–]\s*B?\d+)*\]/;
     const targets = [];
     try {
       const walker = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
@@ -868,7 +1078,7 @@ AIReader = {
   renderInline(state, container, text) {
     const doc = state.doc;
     const byId = new Map((state.blocks || []).map((b) => [b.id, b]));
-    const re = /\[\[(hl|note|fig):(\d+)(?:\|([^\]]*))?\]\]|\[B(\d+)\]|\*\*([^*]+)\*\*|`([^`]+)`/g;
+    const re = /\[\[(hl|note|fig):B?(\d+)(?:\|([^\]]*))?\]\]|(\[B\d+(?:\s*[,，、\-–]\s*B?\d+)*\])|\*\*([^*]+)\*\*|`([^`]+)`/g;
     let last = 0, m;
     while ((m = re.exec(text)) !== null) {
       if (m.index > last) container.appendChild(doc.createTextNode(text.slice(last, m.index)));
@@ -881,14 +1091,20 @@ AIReader = {
             : this.makeApplyButton(state, block, m[1], m[3] || ""));
         }
       } else if (m[4] !== undefined) {
-        const block = byId.get(Number(m[4]));
-        if (block && block.position) {
+        // one or more [B<id>] citations (incl. "[B1, B2]" / "[B1–B2]") → a badge each
+        let any = false;
+        for (const idStr of (m[4].match(/\d+/g) || [])) {
+          const block = byId.get(Number(idStr));
+          if (!block || !block.position) continue;
+          if (any) container.appendChild(doc.createTextNode(" "));
           const badge = this._el(doc, "a", "aireader-ref", "p" + block.pageLabel);
           badge.addEventListener("click", (ev) => { ev.preventDefault(); AIReader.navigateTo(state.attachment.id, block); });
           badge.addEventListener("mouseenter", (ev) => this.showPreview(state, ev, block));
           badge.addEventListener("mouseleave", () => this.hidePreview(state));
           container.appendChild(badge);
-        } else { container.appendChild(doc.createTextNode(m[0])); }
+          any = true;
+        }
+        if (!any) container.appendChild(doc.createTextNode(m[0]));
       } else if (m[5] !== undefined) {
         container.appendChild(this._el(doc, "strong", null, m[5]));
       } else if (m[6] !== undefined) {
@@ -1003,6 +1219,25 @@ AIReader = {
     return removed;
   },
 
+  // One-line vision description of the top figures/tables, folded into a broad
+  // summary so it reflects the figures, not just caption text. Bounded for cost.
+  async _figureDigest(state, maxFigs) {
+    maxFigs = maxFigs || 2;
+    const figs = (state.blocks || []).filter((b) => (b.type === "image" || b.type === "table") && b.position).slice(0, maxFigs);
+    if (!figs.length) return "";
+    const lang = this.getPref("language") || "中文";
+    const out = [];
+    for (const b of figs) {
+      try {
+        const dataURI = await this.renderRegionDataURI(state.attachment, b);
+        const messages = this.buildVisionMessages(this._fmt(), lang, "一句话说明这张" + this.figKind(b.type) + "（第" + b.pageLabel + "页）展示了什么、关键结论。", dataURI);
+        const ans = await this.callLLM(messages);
+        out.push("[B" + b.id + " p" + b.pageLabel + "] " + this.figKind(b.type) + "：" + (ans || "").trim().replace(/\s+/g, " "));
+      } catch (e) { this.log("figDigest error: " + e); }
+    }
+    return out.length ? ("【图表视觉摘要】\n" + out.join("\n") + "\n\n") : "";
+  },
+
   makeFigButton(state, block) {
     const btn = this._el(state.doc, "a", "aireader-apply aireader-figbtn", "🔍 看图 p" + block.pageLabel);
     btn.title = "渲染该区域并用多模态模型识图";
@@ -1088,18 +1323,460 @@ AIReader = {
     return [sys, { role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: dataURI } }] }];
   },
 
-  async autoApplyDirectives(state, text) {
+  // Is there already an AI-created annotation at this block's spot? Used to keep
+  // auto-apply idempotent (re-running must not stack duplicates).
+  _existingAIKeyAt(attachment, block) {
+    if (!attachment || !block || !block.position || typeof attachment.getAnnotations !== "function") return null;
+    const si = this.sortIndex(block);
+    for (let a of (attachment.getAnnotations() || [])) {
+      if (typeof a === "number") a = Zotero.Items.get(a);
+      if (!a) continue;
+      if (a.hasTag && a.hasTag("AI") && a.annotationSortIndex === si) return a.key || true;
+    }
+    return null;
+  },
+
+  // Parse [[hl:id]] / [[note:id|why]] directives (optionally prefixed by a
+  // category word) and write them as real annotations. Deduped by block —
+  // hl + note for the same block become ONE highlight carrying the note, and a
+  // block already annotated by us is skipped (idempotent). An optional
+  // `category` from the text colours the highlight. Returns { count, keys }.
+  async autoApplyDirectives(state, text, opts) {
+    opts = opts || {};
     const byId = new Map((state.blocks || []).map((b) => [b.id, b]));
-    const re = /\[\[(hl|note):(\d+)(?:\|([^\]]*))?\]\]/g;
-    let m, n = 0;
+    // category word may appear just before the directive, e.g. "method [[hl:12]]"
+    const re = /(?:\b(contribution|method|result|limitation|keyterm)\b[^\[]{0,40})?\[\[(hl|note):B?(\d+)(?:\|([^\]]*))?\]\]/gi;
+    // Merge directives per block id so one block yields at most one annotation.
+    const perBlock = new Map();
+    let m;
     while ((m = re.exec(text)) !== null) {
-      const block = byId.get(Number(m[2]));
-      if (block && block.position) {
-        try { await this.applyAnnotation(state.attachment, block, { type: "highlight", comment: m[1] === "note" ? (m[3] || "") : "" }); n++; }
-        catch (e) { this.log("autoApply error: " + e); }
+      const cat = m[1] ? m[1].toLowerCase() : null;
+      const id = Number(m[3]);
+      const note = m[2].toLowerCase() === "note" ? (m[4] || "") : "";
+      const cur = perBlock.get(id) || { comment: "", category: null };
+      if (note && !cur.comment) cur.comment = note;
+      if (cat && !cur.category) cur.category = cat;
+      perBlock.set(id, cur);
+    }
+    const cap = opts.cap || Infinity;
+    let n = 0; const keys = []; const applied = [];
+    for (const [id, info] of perBlock) {
+      if (n >= cap) break;
+      const block = byId.get(id);
+      if (!block || !block.position) continue;
+      if (this._existingAIKeyAt(state.attachment, block)) continue; // idempotent
+      const category = opts.forceCategory || info.category || null;
+      const color = this.colorForCategory(category);
+      try {
+        const r = await this.applyAnnotation(state.attachment, block, { type: "highlight", comment: info.comment, color });
+        if (r && r.key) keys.push(r.key);
+        // carry enough to recreate on redo
+        applied.push({ key: r && r.key, category, blockId: id, pageLabel: block.pageLabel, comment: info.comment, color });
+        n++;
+      } catch (e) { this.log("autoApply error: " + e); }
+    }
+    return { count: n, keys, applied };
+  },
+
+  // ----------------------------------------------- agentic read & annotate
+  // Neutral tool declarations (JSON-Schema); shaped per API format by _toolSchemas.
+  _agentTools() {
+    return [
+      { name: "list_sections", description: "列出论文的章节大纲（标题、页码、句子数）。先调用它了解结构。", parameters: { type: "object", properties: {}, required: [] } },
+      { name: "read_section", description: "读取某一章节的全部句子，返回每句的 id、页码、文本。index 来自 list_sections。", parameters: { type: "object", properties: { index: { type: "integer", description: "章节序号" } }, required: ["index"] } },
+      { name: "highlight", description: "在 PDF 里高亮某一句并加一句话批注。id 必须来自 read_section 返回的 id。", parameters: { type: "object", properties: { id: { type: "integer" }, category: { type: "string", enum: ["contribution", "method", "result", "limitation", "keyterm"] }, reason: { type: "string", description: "一句话理由（作为批注）" } }, required: ["id", "category"] } },
+      { name: "list_figures", description: "列出论文中的图/表（id、页码、标题）。想看某张图就先用它找到 id。", parameters: { type: "object", properties: {}, required: [] } },
+      { name: "view_figure", description: "查看某张图/表的视觉内容：渲染该区域并用多模态模型识读，返回图的文字描述。id 来自 list_figures。", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } },
+      { name: "finish", description: "读完并标注完后调用，结束。", parameters: { type: "object", properties: { note: { type: "string" } }, required: [] } },
+    ];
+  },
+  _toolSchemas(fmt) {
+    const T = this._agentTools();
+    if (fmt === "anthropic") return T.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
+    if (fmt === "responses") return T.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
+    return T.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
+  },
+  _toolBody(fmt, messages, tools, stream) {
+    const model = this.getPref("model");
+    const t = parseFloat(this.getPref("temperature")); const temp = isNaN(t) ? 0.3 : t;
+    const mtRaw = parseInt(this.getPref("maxTokens"), 10); const maxTok = isNaN(mtRaw) || mtRaw <= 0 ? 0 : mtRaw;
+    if (fmt === "anthropic") {
+      const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+      const msgs = messages.filter((m) => m.role !== "system");
+      const body = { model, messages: msgs, max_tokens: maxTok || 8000, temperature: temp, tools, stream: !!stream };
+      if (system) body.system = system;
+      return JSON.stringify(body);
+    }
+    if (fmt === "responses") {
+      const body = { model, input: messages, temperature: temp, tools, tool_choice: "auto", stream: !!stream };
+      if (maxTok) body.max_output_tokens = maxTok;
+      return JSON.stringify(body);
+    }
+    const body = { model, messages, temperature: temp, tools, tool_choice: "auto", stream: !!stream };
+    if (maxTok) body.max_tokens = maxTok;
+    if (stream) body.stream_options = { include_usage: true };
+    return JSON.stringify(body);
+  },
+  // Accumulate streamed tool-call fragments into `tc` (keyed by index).
+  _streamToolDelta(fmt, j, tc) {
+    if (fmt === "anthropic") {
+      if (j.type === "content_block_start" && j.content_block && j.content_block.type === "tool_use") tc[j.index] = { id: j.content_block.id, name: j.content_block.name, args: "" };
+      else if (j.type === "content_block_delta" && j.delta && j.delta.type === "input_json_delta" && tc[j.index]) tc[j.index].args += j.delta.partial_json || "";
+      return;
+    }
+    if (fmt === "responses") {
+      if (j.type === "response.output_item.added" && j.item && j.item.type === "function_call") tc[j.output_index] = { id: j.item.call_id || j.item.id, name: j.item.name, args: "" };
+      else if (j.type === "response.function_call_arguments.delta" && tc[j.output_index]) tc[j.output_index].args += j.delta || "";
+      return;
+    }
+    const arr = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.tool_calls;
+    if (Array.isArray(arr)) for (const t of arr) { const i = t.index || 0; tc[i] = tc[i] || { id: "", name: "", args: "" }; if (t.id) tc[i].id = t.id; if (t.function) { if (t.function.name) tc[i].name = t.function.name; if (t.function.arguments) tc[i].args += t.function.arguments; } }
+  },
+  _finalizeToolCalls(tc) {
+    return Object.keys(tc).sort((a, b) => a - b).map((k) => ({ id: tc[k].id, name: tc[k].name, args: this._safeJSON(tc[k].args) })).filter((c) => c.name);
+  },
+  // Streamed turn that returns both the streamed text and any tool calls.
+  async _streamAnswer(messages, tools, onDelta, shouldStop, meta) {
+    meta = meta || {};
+    const fmt = this._fmt();
+    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._toolBody(fmt, messages, tools, true) });
+    if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
+    if (!resp.body || typeof resp.body.getReader !== "function") {
+      const raw = await resp.text(); const data = this._parseOrThrow(raw);
+      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+      this._captureUsage(meta, data);
+      const parsed = this._parseToolCalls(fmt, data);
+      if (parsed.text) onDelta(parsed.text);
+      return { text: parsed.text, calls: parsed.calls };
+    }
+    const reader = resp.body.getReader(); const dec = new TextDecoder();
+    let buf = "", text = ""; const tc = {};
+    while (true) {
+      if (shouldStop && shouldStop()) { try { await reader.cancel(); } catch (e) {} break; }
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line || !line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim(); if (payload === "[DONE]") continue;
+        let j; try { j = JSON.parse(payload); } catch (e) { continue; }
+        if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+        this._captureUsage(meta, j);
+        const d = this._streamDelta(fmt, j); if (d) { text += d; onDelta(d); }
+        this._streamToolDelta(fmt, j, tc);
       }
     }
-    return n;
+    return { text, calls: this._finalizeToolCalls(tc) };
+  },
+  _safeJSON(s) { if (s && typeof s === "object") return s; try { return JSON.parse(s || "{}"); } catch (e) { return {}; } },
+  _parseToolCalls(fmt, data) {
+    if (fmt === "anthropic") {
+      const content = Array.isArray(data.content) ? data.content : [];
+      let text = ""; const calls = [];
+      for (const c of content) { if (c.type === "text") text += c.text || ""; else if (c.type === "tool_use") calls.push({ id: c.id, name: c.name, args: c.input || {} }); }
+      return { text, calls, raw: content };
+    }
+    if (fmt === "responses") {
+      const out = Array.isArray(data.output) ? data.output : [];
+      let text = ""; const calls = [];
+      for (const o of out) { if (o.type === "function_call") calls.push({ id: o.call_id || o.id, name: o.name, args: this._safeJSON(o.arguments) }); else if (o.type === "message" && Array.isArray(o.content)) text += o.content.map((x) => x.text || "").join(""); }
+      if (typeof data.output_text === "string" && data.output_text) text = data.output_text;
+      return { text, calls, raw: out };
+    }
+    const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
+    const calls = (msg.tool_calls || []).map((tc) => ({ id: tc.id, name: tc.function && tc.function.name, args: this._safeJSON(tc.function && tc.function.arguments) }));
+    return { text: msg.content || "", calls, raw: msg };
+  },
+  // Build the assistant turn in each format's native shape from {text, calls}
+  // (works whether the turn came from a streamed or non-streamed response).
+  _pushAssistantToolTurn(fmt, messages, parsed) {
+    const calls = parsed.calls || [], text = parsed.text || "";
+    if (fmt === "anthropic") {
+      const content = [];
+      if (text) content.push({ type: "text", text });
+      for (const c of calls) content.push({ type: "tool_use", id: c.id, name: c.name, input: c.args || {} });
+      messages.push({ role: "assistant", content });
+      return;
+    }
+    if (fmt === "responses") {
+      if (text) messages.push({ role: "assistant", content: text });
+      for (const c of calls) messages.push({ type: "function_call", call_id: c.id, name: c.name, arguments: JSON.stringify(c.args || {}) });
+      return;
+    }
+    const tool_calls = calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args || {}) } }));
+    messages.push({ role: "assistant", content: text || null, tool_calls });
+  },
+  _pushToolResults(fmt, messages, results) {
+    if (fmt === "anthropic") { messages.push({ role: "user", content: results.map((r) => ({ type: "tool_result", tool_use_id: r.id, content: r.output })) }); return; }
+    if (fmt === "responses") { for (const r of results) messages.push({ type: "function_call_output", call_id: r.id, output: r.output }); return; }
+    for (const r of results) messages.push({ role: "tool", tool_call_id: r.id, content: r.output });
+  },
+
+  // Group blocks into sections by preceding heading. index == array position.
+  _buildSections(blocks) {
+    const sections = []; let cur = null;
+    const start = (title, page) => { cur = { index: 0, title, page, blockIds: [] }; sections.push(cur); };
+    for (const b of blocks || []) {
+      if (b.type === "heading") { start((b.text || "（无标题）").slice(0, 80), b.pageLabel); continue; }
+      if (b.type === "image" || b.type === "math") continue;
+      if (!b.position || !b.text) continue;
+      if (!cur) start("前言 / 摘要", b.pageLabel);
+      cur.blockIds.push(b.id);
+    }
+    const kept = sections.filter((s) => s.blockIds.length);
+    kept.forEach((s, i) => { s.index = i; });
+    return kept;
+  },
+
+  // Build one collapsible tool block (borrowed from cc_manager's tool-timeline):
+  // arrow/dot + name + brief + outcome; click to expand body (read/list) or jump
+  // to the sentence (highlight). Returns the element (caller appends).
+  _buildToolBlock(state, r) {
+    const doc = state.doc;
+    const block = this._el(doc, "div", "aireader-tool");
+    const header = this._el(doc, "div", "aireader-tool-header");
+    if (r.cat) { const dot = this._el(doc, "span", "aireader-tool-dot"); dot.style.background = this.colorForCategory(r.cat); header.appendChild(dot); }
+    else header.appendChild(this._el(doc, "span", "aireader-tool-arrow", "›"));
+    header.appendChild(this._el(doc, "span", "aireader-tool-name", r.label));
+    if (r.brief) header.appendChild(this._el(doc, "span", "aireader-tool-brief", r.brief));
+    if (r.outcome) header.appendChild(this._el(doc, "span", "aireader-tool-outcome", r.outcome));
+    block.appendChild(header);
+    if (r.bodyText) {
+      block.appendChild(this._el(doc, "div", "aireader-tool-body", r.bodyText));
+      header.style.cursor = "pointer";
+      header.addEventListener("click", () => block.classList.toggle("aireader-tool-open"));
+    } else if (r.jumpId != null) {
+      header.style.cursor = "pointer";
+      header.addEventListener("click", () => { const blk = (state.blocks || []).find((x) => x.id === r.jumpId); if (blk) this.navigateTo(state.attachment.id, blk); });
+    }
+    return block;
+  },
+  _renderToolBlock(state, wrap, r) { const b = this._buildToolBlock(state, r); wrap.appendChild(b); return b; },
+
+  // Append a tool block, compressing a run of same-type calls into a collapsible
+  // group ("读取章节 × N"): the first of a kind shows inline; once a second of
+  // the same kind arrives the group header appears and the body collapses.
+  _appendToolGrouped(state, wrap, grp, r) {
+    const doc = state.doc;
+    const block = this._buildToolBlock(state, r);
+    if (grp.label !== r.label || !grp.group) {
+      const group = this._el(doc, "div", "aireader-toolgroup");
+      const header = this._el(doc, "div", "aireader-toolgroup-header");
+      header.style.display = "none";
+      header.appendChild(this._el(doc, "span", "aireader-tool-arrow", "›"));
+      header.appendChild(this._el(doc, "span", "aireader-tool-name", r.label));
+      const countEl = this._el(doc, "span", "aireader-toolgroup-count", "");
+      header.appendChild(countEl);
+      const body = this._el(doc, "div", "aireader-toolgroup-body");
+      group.appendChild(header); group.appendChild(body);
+      wrap.appendChild(group);
+      header.addEventListener("click", () => group.classList.toggle("aireader-toolgroup-open"));
+      grp.label = r.label; grp.group = group; grp.header = header; grp.body = body; grp.countEl = countEl; grp.count = 0;
+    }
+    grp.body.appendChild(block); grp.count++;
+    if (grp.count >= 2) { grp.header.style.display = "flex"; grp.countEl.textContent = "× " + grp.count; grp.group.classList.add("aireader-toolgroup-multi"); }
+    return block;
+  },
+
+  // Execute one tool call against the paper. c = {sections, byId, run, tally, reads}.
+  // Returns { output (string for the model), render (tool-block spec), finish? }.
+  async _execTool(state, c, call) {
+    const name = call.name, args = call.args || {};
+    if (name === "list_sections") {
+      return { output: JSON.stringify(c.sections.map((s) => ({ index: s.index, title: s.title, page: s.page, sentences: s.blockIds.length }))),
+        render: { label: "列出章节", outcome: "→ " + c.sections.length + " 节", bodyText: c.sections.map((s) => "[" + s.index + "] " + s.title + "  (p" + s.page + " · " + s.blockIds.length + " 句)").join("\n") } };
+    }
+    if (name === "read_section") {
+      c.reads = (c.reads || 0) + 1;
+      const s = c.sections[args.index];
+      if (!s) return { output: JSON.stringify({ error: "no such section " + args.index }), render: { label: "读取章节", brief: "index " + args.index, outcome: "✕ 无此节" } };
+      const lines = []; let total = 0;
+      for (const id of s.blockIds) { const b = c.byId.get(id); if (!b) continue; lines.push({ id: b.id, page: b.pageLabel, text: b.text }); total += (b.text || "").length; if (total > 9000) break; }
+      return { output: JSON.stringify(lines), render: { label: "读取章节", brief: s.title, outcome: "→ " + lines.length + " 句", bodyText: lines.map((l) => "[B" + l.id + " p" + l.page + "] " + l.text).join("\n") } };
+    }
+    if (name === "highlight") {
+      const b = c.byId.get(args.id);
+      if (!b || !b.position) return { output: JSON.stringify({ error: "no such sentence id " + args.id }), render: { label: "高亮", brief: "id " + args.id, outcome: "✕ 无此句" } };
+      const cat = args.category || "keyterm";
+      if (this._existingAIKeyAt(state.attachment, b)) return { output: JSON.stringify({ ok: true, note: "already highlighted" }), render: { label: "高亮", cat, brief: (this.CATEGORY_LABELS[cat] || cat), outcome: "· 已存在", jumpId: b.id } };
+      const r = await this.applyAnnotation(state.attachment, b, { type: "highlight", comment: args.reason || "", color: this.colorForCategory(cat) });
+      c.run.keys.push(r.key); c.run.applied.push({ key: r.key, category: cat, blockId: b.id, pageLabel: b.pageLabel, comment: args.reason || "", color: this.colorForCategory(cat) });
+      c.tally[cat] = (c.tally[cat] || 0) + 1;
+      return { output: JSON.stringify({ ok: true, key: r.key }), render: { label: "高亮", cat, brief: (this.CATEGORY_LABELS[cat] || cat) + (args.reason ? " · " + args.reason : ""), outcome: "p" + b.pageLabel, jumpId: b.id } };
+    }
+    if (name === "list_figures") {
+      const figs = (state.blocks || []).filter((b) => (b.type === "image" || b.type === "table") && b.position);
+      return { output: JSON.stringify(figs.map((f) => ({ id: f.id, page: f.pageLabel, kind: this.figKind(f.type), caption: (f.text || "").slice(0, 80) }))),
+        render: { label: "列出图表", outcome: "→ " + figs.length + " 个", bodyText: figs.map((f) => "[B" + f.id + " p" + f.pageLabel + "] " + this.figKind(f.type) + (f.text ? ": " + f.text.slice(0, 60) : "")).join("\n") || "（无图表）" } };
+    }
+    if (name === "view_figure") {
+      const b = c.byId.get(args.id);
+      if (!b || !b.position) return { output: JSON.stringify({ error: "no such figure id " + args.id }), render: { label: "看图", brief: "id " + args.id, outcome: "✕ 无此图" } };
+      try {
+        const dataURI = await this.renderRegionDataURI(state.attachment, b);
+        const lang = this.getPref("language") || "中文";
+        const vm = this.buildVisionMessages(this._fmt(), lang, "请详细描述这张" + this.figKind(b.type) + "（第" + b.pageLabel + "页）展示的内容、坐标轴/变量、关键趋势与结论。", dataURI);
+        const desc = (await this.callLLM(vm)).trim();
+        return { output: JSON.stringify({ description: desc }), render: { label: "看图", brief: this.figKind(b.type) + " p" + b.pageLabel, outcome: "→ 已识读", bodyText: desc, jumpId: b.id } };
+      } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label: "看图", brief: "p" + b.pageLabel, outcome: "✕ 失败" } }; }
+    }
+    if (name === "finish") return { output: JSON.stringify({ ok: true }), render: { label: "完成", outcome: "✓" }, finish: true };
+    return { output: JSON.stringify({ error: "unknown tool " + name }), render: { label: name, outcome: "✕ 未知工具" } };
+  },
+
+  // A tool-calling agent: the model LISTS the paper's sections, READS the ones
+  // it chooses, and HIGHLIGHTs specific sentences — via native function-calling.
+  // The tool-interaction process is shown live in the bubble.
+  async agentAnnotate(state) {
+    if (!this.requireKey(state)) return;
+    if (state.streaming) return;
+    const deep = !!this._deepRead;
+    const MAX_TURNS = deep ? 80 : 30, MAX_ANN = deep ? 120 : 60, MAX_READS = deep ? 200 : 40;
+    await this.ensureBlocks(state);
+    const sections = this._buildSections(state.blocks);
+    if (!sections.length) { this.setStatus(state, "无法提取正文结构，无法通读。", "error"); return; }
+    const lang = this.getPref("language") || "中文";
+    const fmt = this._fmt();
+    const byId = new Map((state.blocks || []).map((b) => [b.id, b]));
+
+    this.appendUserMsg(state, "AI 通读并标注全文");
+    const { bubble } = this.appendAssistantMsg(state);
+    state.streaming = true; state.cancel = false; this.updateSendButton(state);
+    const headline = this._el(state.doc, "div", "aireader-agent-sum", "🔧 正在阅读并标注…");
+    bubble.appendChild(headline);
+    const logWrap = this._el(state.doc, "div", "aireader-toollog");
+    bubble.appendChild(logWrap);
+
+    const run = { keys: [], applied: [], at: Date.now() };
+    const tally = {};
+    const grp = {}; // groups consecutive same-type tool blocks into "× N"
+    const c = { sections, byId, run, tally, reads: 0 };
+    let steps = 0;
+    const setHead = () => { headline.textContent = "🔧 阅读并标注中… 第 " + steps + " 步 · 已标注 " + run.keys.length + " 处"; };
+
+    const sys = "你是论文精读助手，用" + lang + "工作。任务：通读这篇论文，并在 PDF 里高亮关键句、加简短批注。\n" +
+      "工具：list_sections 看章节结构；read_section 读你选的章节拿到每句 id；highlight 高亮某个句子 id 并给类别和一句话理由；list_figures 列出图表；view_figure 识读某张图/表的视觉内容。\n" +
+      "流程：先 list_sections；再对值得读的章节逐个 read_section；遇到被正文引用的重要图/表，用 list_figures + view_figure 看懂再判断；对真正关键的句子调用 highlight（每节通常 2-6 句，务必精选，避免过度标注）；覆盖重要章节后调用 finish 结束。\n" +
+      (deep ? "【深读模式】务必遍历所有章节（对每个 section 都 read_section，不要跳过），并对每张图/表 view_figure；在此基础上更充分地标注。\n" : "") +
+      "类别只能是 contribution / method / result / limitation / keyterm。highlight 的 id 必须来自 read_section 返回的 id。";
+    const messages = [{ role: "system", content: sys }, { role: "user", content: (deep ? "请深读本论文（遍历所有章节 + 看所有图表）并标注关键句。先调用 list_sections。" : "请通读本论文并标注关键句。先调用 list_sections。") }];
+    const tools = this._toolSchemas(fmt);
+
+    try {
+      let finished = false, nudged = false;
+      for (let turn = 0; turn < MAX_TURNS && !finished; turn++) {
+        if (state.cancel) break;
+        if (run.keys.length >= MAX_ANN) { this._renderToolBlock(state, logWrap, { label: "提示", outcome: "已达标注上限" }); break; }
+        this.setStatus(state, "阅读中… 第 " + (turn + 1) + " 步", "busy");
+        let data;
+        try {
+          const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._toolBody(fmt, messages, tools) });
+          const raw = await resp.text();
+          if (!resp.ok) throw this._fail(resp, raw);
+          data = this._parseOrThrow(raw);
+          if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        } catch (e) { this.log("agent turn error: " + e); this._renderToolBlock(state, logWrap, { label: "请求失败", outcome: String(e.message || e).slice(0, 80) }); break; }
+        const parsed = this._parseToolCalls(fmt, data);
+        if (!parsed.calls.length) {
+          if (!nudged && run.keys.length === 0) { nudged = true; this._pushAssistantToolTurn(fmt, messages, parsed); messages.push({ role: "user", content: "请使用工具：先 list_sections，再 read_section，然后 highlight 关键句，最后 finish。" }); continue; }
+          if (parsed.text) { const t = this._el(state.doc, "div", "aireader-tool-thought", parsed.text); logWrap.appendChild(t); }
+          break;
+        }
+        this._pushAssistantToolTurn(fmt, messages, parsed);
+        const results = [];
+        for (const call of parsed.calls) {
+          steps++; setHead();
+          if (call.name === "read_section" && c.reads >= MAX_READS) { results.push({ id: call.id, name: call.name, output: JSON.stringify({ error: "read limit reached" }) }); continue; }
+          const r = await this._execTool(state, c, call);
+          this._appendToolGrouped(state, logWrap, grp, r.render);
+          results.push({ id: call.id, name: call.name, output: r.output });
+          if (r.finish) finished = true;
+          if (run.keys.length >= MAX_ANN) break;
+        }
+        this._pushToolResults(fmt, messages, results);
+        setHead();
+        try { state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight; } catch (e) {}
+      }
+      state._lastRun = run;
+      headline.textContent = (state.cancel ? "已停止 · " : "✓ ") + "本次共标注 " + run.keys.length + " 处";
+      this._renderAgentSummary(state, bubble, tally, run.keys.length, state.cancel);
+      this.setStatus(state, state.cancel ? "已停止。" : ("完成，已标注 " + run.keys.length + " 处。"), state.cancel ? "muted" : "ok");
+    } catch (e) {
+      headline.textContent = "出错：" + (e.message || e);
+    } finally {
+      state.streaming = false; this.updateSendButton(state);
+    }
+  },
+
+  _renderAgentSummary(state, bubble, tally, total, stopped) {
+    const doc = state.doc;
+    const legend = this._el(doc, "div", "aireader-agent-legend");
+    for (const cat of ["contribution", "method", "result", "limitation", "keyterm"]) {
+      if (!tally[cat]) continue;
+      const item = this._el(doc, "span", "aireader-agent-legenditem", (this.CATEGORY_LABELS[cat] || cat) + " " + tally[cat]);
+      item.style.borderBottom = "2px solid " + this.colorForCategory(cat);
+      legend.appendChild(item);
+    }
+    bubble.appendChild(legend);
+    if (total > 0) {
+      // One button that toggles between undo (erase this run) and redo
+      // (re-create what was just undone).
+      const btn = this._el(doc, "button", "aireader-followup", "↩ 撤销本次标注");
+      btn.addEventListener("click", async () => {
+        if (btn._busy) return; btn._busy = true;
+        try {
+          if (btn._mode === "redo") {
+            btn.textContent = "重做中…";
+            const n = await this.redoRun(state);
+            btn._mode = "undo"; btn.textContent = "↩ 撤销本次标注（已重做 " + n + " 处）";
+          } else {
+            btn.textContent = "撤销中…";
+            const n = await this.undoRun(state);
+            btn._mode = "redo"; btn.textContent = "↪ 重做本次标注（已撤销 " + n + " 处）";
+          }
+        } finally { btn._busy = false; }
+      });
+      bubble.appendChild(btn);
+    }
+  },
+
+  // Erase every annotation created by the most recent agentAnnotate run, and
+  // stash enough to recreate them so the action can be redone.
+  async undoRun(state) {
+    const run = state._lastRun;
+    if (!run || !run.keys || !run.keys.length) return 0;
+    const attachment = state.attachment;
+    let removed = 0;
+    for (const key of run.keys) {
+      if (!key) continue;
+      try { await this.removeAnnotation({ key, libraryID: attachment.libraryID }, attachment); removed++; }
+      catch (e) { this.log("undoRun erase: " + e); }
+    }
+    state._redo = { applied: (run.applied || []).slice(), at: Date.now() };
+    state._lastRun = { keys: [], applied: [], at: Date.now() };
+    return removed;
+  },
+
+  // Re-create the annotations that the last undoRun removed.
+  async redoRun(state) {
+    const redo = state._redo;
+    if (!redo || !redo.applied || !redo.applied.length) return 0;
+    const byId = new Map((state.blocks || []).map((b) => [b.id, b]));
+    const run = { keys: [], applied: [], at: Date.now() };
+    for (const a of redo.applied) {
+      const block = byId.get(a.blockId);
+      if (!block || !block.position) continue;
+      if (this._existingAIKeyAt(state.attachment, block)) continue; // already there
+      try {
+        const r = await this.applyAnnotation(state.attachment, block, { type: "highlight", comment: a.comment, color: a.color });
+        const entry = Object.assign({}, a, { key: r && r.key });
+        run.keys.push(r && r.key); run.applied.push(entry);
+      } catch (e) { this.log("redoRun apply: " + e); }
+    }
+    state._lastRun = run;
+    state._redo = { applied: [], at: Date.now() };
+    return run.keys.length;
   },
 
   async navigateTo(attachmentID, block) {
@@ -1110,10 +1787,14 @@ AIReader = {
   // ---------------------------------------------------- annotation writing
   sortIndex(block) {
     const pi = block.position.pageIndex;
-    let topY = 0; for (const r of block.position.rects) topY = Math.max(topY, r[3]);
+    let topY = 0, minX = Infinity;
+    for (const r of block.position.rects) { topY = Math.max(topY, r[3]); minX = Math.min(minX, r[0]); }
     const top = Math.max(0, Math.floor((block.pageHeight || 792) - topY));
+    // Horizontal offset distinguishes sentence-level blocks sharing a line (same
+    // top) — otherwise their sortIndex collides and idempotency over-matches.
+    const off = Math.max(0, Math.floor(minX === Infinity ? 0 : minX));
     const pad = (n, w) => String(n).slice(0, w).padStart(w, "0");
-    return pad(pi, 5) + "|" + pad(0, 6) + "|" + pad(top, 5);
+    return pad(pi, 5) + "|" + pad(off, 6) + "|" + pad(top, 5);
   },
 
   // Read the user's existing highlights/underlines/notes from the PDF so the
@@ -1140,7 +1821,7 @@ AIReader = {
     return out;
   },
 
-  async applyAnnotation(attachment, block, { type, comment }) {
+  async applyAnnotation(attachment, block, { type, comment, color }) {
     if (!attachment || !attachment.libraryID) throw new Error("No attachment");
     if (!Zotero.Annotations || typeof Zotero.Annotations.saveFromJSON !== "function") throw new Error("Annotation API unavailable");
     const json = {
@@ -1148,7 +1829,7 @@ AIReader = {
       type: type || "highlight",
       text: block.text,
       comment: comment || "",
-      color: this.HILITE_COLOR,
+      color: color || this.HILITE_COLOR,
       pageLabel: block.pageLabel === "?" ? "" : String(block.pageLabel),
       sortIndex: this.sortIndex(block),
       position: block.position,
@@ -1285,19 +1966,22 @@ AIReader = {
   _mdInlineHTML(state, text) {
     const byId = new Map((state.blocks || []).map((b) => [b.id, b]));
     let out = "", last = 0, m;
-    const re = /\[\[(hl|note):(\d+)(?:\|([^\]]*))?\]\]|\[B(\d+)\]|\*\*([^*]+)\*\*|`([^`]+)`/g;
+    const re = /\[\[(hl|note):B?(\d+)(?:\|([^\]]*))?\]\]|(\[B\d+(?:\s*[,，、\-–]\s*B?\d+)*\])|\*\*([^*]+)\*\*|`([^`]+)`/g;
     while ((m = re.exec(text)) !== null) {
       out += this._escapeHTML(text.slice(last, m.index));
       last = re.lastIndex;
       if (m[1]) { /* drop annotation directives in notes */ }
       else if (m[4] !== undefined) {
-        const b = byId.get(Number(m[4]));
-        if (b) {
-          const key = state.attachment && state.attachment.key;
+        // one or more [B<id>] citations (incl. "[B1, B2]" / "[B1–B2]")
+        const key = state.attachment && state.attachment.key;
+        const parts = [];
+        for (const idStr of (m[4].match(/\d+/g) || [])) {
+          const b = byId.get(Number(idStr)); if (!b) continue;
           const page = (b.pageLabel && b.pageLabel !== "?") ? b.pageLabel : "";
-          if (key && page) out += ' <a href="zotero://open-pdf/library/items/' + key + "?page=" + encodeURIComponent(page) + '" style="color:#3b7ddd;text-decoration:none">(p' + this._escapeHTML(page) + ")</a>";
-          else out += ' <span style="color:#888">(p' + this._escapeHTML(b.pageLabel) + ")</span>";
+          if (key && page) parts.push('<a href="zotero://open-pdf/library/items/' + key + "?page=" + encodeURIComponent(page) + '" style="color:#3b7ddd;text-decoration:none">p' + this._escapeHTML(page) + "</a>");
+          else parts.push('<span style="color:#888">p' + this._escapeHTML(b.pageLabel) + "</span>");
         }
+        out += parts.length ? (" (" + parts.join(", ") + ")") : this._escapeHTML(m[0]);
       }
       else if (m[5] !== undefined) out += "<strong>" + this._escapeHTML(m[5]) + "</strong>";
       else if (m[6] !== undefined) out += "<code>" + this._escapeHTML(m[6]) + "</code>";
@@ -1378,9 +2062,33 @@ AIReader = {
   _fail(resp, raw) { return new Error("HTTP " + resp.status + " " + resp.statusText + "\n" + (raw || "").slice(0, 1200)); },
   _parseOrThrow(raw) { try { return JSON.parse(raw); } catch (e) { throw new Error("响应不是 JSON（Base URL 或 API 格式可能不对）。实际返回：\n" + (raw || "").slice(0, 1200)); } },
 
+  // fetch with an idle timeout and one automatic retry on a *network* failure
+  // (connection reset / empty reply — the transient errors we actually hit).
+  // HTTP errors (4xx/5xx with a body) are returned as-is and NOT retried.
+  async _fetchLLM(url, opts, cfg) {
+    cfg = cfg || {};
+    const timeoutMs = cfg.timeoutMs || 60000;
+    const retries = cfg.retries == null ? 1 : cfg.retries;
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, timeoutMs) : null;
+      try {
+        const resp = await fetch(url, ctrl ? Object.assign({}, opts, { signal: ctrl.signal }) : opts);
+        if (timer) clearTimeout(timer);
+        return resp; // HTTP status handled by caller; not a network failure
+      } catch (e) {
+        if (timer) clearTimeout(timer);
+        lastErr = e;
+        if (attempt < retries) { this.log("fetch retry after network error: " + (e && e.message)); continue; }
+      }
+    }
+    throw new Error("网络请求失败（已重试）：" + (lastErr && lastErr.message ? lastErr.message : lastErr));
+  },
+
   async callLLM(messages) {
     const fmt = this._fmt();
-    const resp = await fetch(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, false) });
+    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, false) });
     const raw = await resp.text();
     if (!resp.ok) throw this._fail(resp, raw);
     const data = this._parseOrThrow(raw);
@@ -1393,7 +2101,9 @@ AIReader = {
   async callLLMStream(messages, onDelta, shouldStop, meta) {
     meta = meta || {};
     const fmt = this._fmt();
-    const resp = await fetch(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, true) });
+    // _fetchLLM retries only the connection (before any stream bytes), so a
+    // mid-stream drop is never silently retried into a duplicate answer.
+    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, true) });
     if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
     if (!resp.body || typeof resp.body.getReader !== "function") {
       const raw = await resp.text();
@@ -1449,7 +2159,7 @@ AIReader = {
 
       const wrap = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
       wrap.style.cssText =
-        "min-width:180px;max-width:340px;margin-top:6px;padding:5px;border-radius:13px;background:" + glass +
+        "min-width:280px;max-width:460px;margin-top:6px;padding:5px;border-radius:13px;background:" + glass +
         ";-webkit-backdrop-filter:" + filter + ";backdrop-filter:" + filter +
         ";border:0.5px solid " + border + ";box-shadow:0 10px 34px rgba(0,0,0,0.22),0 1px 2px rgba(0,0,0,0.12)" +
         ";font-family:" + this._UIFONT + ";color:" + fg + ";";
@@ -1458,7 +2168,7 @@ AIReader = {
       // result text — selectable so the user can copy with the mouse too
       const result = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
       result.style.cssText = "display:none;margin:5px 7px 3px;padding-top:7px;border-top:0.5px solid " + border +
-        ";max-width:320px;max-height:220px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;color:" + fg +
+        ";max-width:440px;max-height:260px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;color:" + fg +
         ";user-select:text;-webkit-user-select:text;cursor:text;";
 
       // action row under a result (copy / write-to-annotation); hidden until a
@@ -1468,7 +2178,7 @@ AIReader = {
       const mkMini = (label) => {
         const b = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
         b.textContent = label;
-        b.style.cssText = "display:inline-flex;align-items:center;cursor:pointer;padding:4px 10px;border-radius:7px;font-size:11.5px;font-weight:600;color:" + accent + ";background:transparent;border:0.5px solid " + border + ";margin-inline-end:8px;transition:background .08s,color .08s;";
+        b.style.cssText = "display:inline-flex;align-items:center;white-space:nowrap;cursor:pointer;padding:4px 10px;border-radius:7px;font-size:11.5px;font-weight:600;color:" + accent + ";background:transparent;border:0.5px solid " + border + ";margin-inline-end:8px;transition:background .08s,color .08s;";
         b.addEventListener("mouseenter", () => { b.style.background = accent; b.style.color = "#fff"; });
         b.addEventListener("mouseleave", () => { b.style.background = "transparent"; b.style.color = accent; });
         return b;
@@ -1509,22 +2219,37 @@ AIReader = {
         b.addEventListener("click", () => run(b, labelSpan));
         return b;
       };
-      // Stream a producer into the result area with live feedback. Busy state is
+      // cancel flag for an in-flight stream; a "停止" chip flips it.
+      const popupCancel = { v: false };
+      const stopEl = mkMini("■ 停止");
+      stopEl.style.display = "none";
+      stopEl.addEventListener("click", () => { popupCancel.v = true; stopEl.textContent = "停止中…"; });
+
+      // Stream a producer into the result area with live feedback. The result is
+      // rendered as Markdown/KaTeX (same pipeline as the sidebar). Busy state is
       // shown ONLY via the label text + result area (never the background), so it
       // can't collide with hover styling.
+      const renderMD = (t) => { try { result.innerHTML = AIReader._mathAndMarkdown(t); } catch (e) { result.textContent = t; } };
       const runStream = (btn, labelSpan, baseLabel, waitText, showActions, streamRun) => async () => {
-        if (btn._busy) return; btn._busy = true;
+        if (btn._busy) return; btn._busy = true; popupCancel.v = false;
         labelSpan.textContent = baseLabel + " · " + waitText + " ⏳";
         result.style.display = "block"; result.style.color = fg; result.textContent = "⏳ " + waitText + "…";
         actions.style.display = "none"; lastResult = "";
-        let acc = "";
+        stopEl.textContent = "■ 停止"; stopEl.style.display = "inline-flex";
+        let acc = "", lastR = 0;
         try {
-          await streamRun((d) => { acc += d; result.textContent = acc; try { result.scrollTop = result.scrollHeight; } catch (e) {} });
+          await streamRun((d) => {
+            acc += d; const now = Date.now();
+            if (now - lastR > 90) { lastR = now; renderMD(acc); try { result.scrollTop = result.scrollHeight; } catch (e) {} }
+          }, () => popupCancel.v);
           lastResult = acc.trim();
-          result.textContent = lastResult || "(空响应)";
+          if (lastResult) renderMD(lastResult); else result.textContent = popupCancel.v ? "（已停止）" : "(空响应)";
           if (showActions && lastResult) actions.style.display = "flex";
+          // Cache so the result survives the reader re-rendering this popup on
+          // scroll (otherwise scrolling wiped the freshly-built DOM).
+          if (lastResult) AIReader._popupCache = { text: text, raw: lastResult, showActions: !!showActions };
         } catch (e) { result.style.color = accent; result.textContent = "出错：" + (e.message || e); }
-        finally { btn._busy = false; labelSpan.textContent = baseLabel; }
+        finally { btn._busy = false; labelSpan.textContent = baseLabel; stopEl.style.display = "none"; }
       };
 
       wrap.appendChild(mkItem("问 AI（引用到侧栏）", true, (b) => {
@@ -1533,13 +2258,23 @@ AIReader = {
         result.textContent = "已引用到右侧输入框 →"; actions.style.display = "none"; lastResult = "";
       }));
       wrap.appendChild(mkSep());
-      // AI 解释：流式输出，看得到论文相关段落 + 之前的对话历史；完成后出「复制 / 写入批注」
+      // AI 解释：流式输出 + Markdown 渲染，看得到论文相关段落 + 之前的对话历史；完成后出「复制 / 写入批注」
       wrap.appendChild(mkItem("AI 解释", false, (b, ls) =>
-        runStream(b, ls, "AI 解释", "解释中", true, (onDelta) => this.explainSelectionStream(reader, text, onDelta))()));
+        runStream(b, ls, "AI 解释", "解释中", true, (onDelta, stop) => this.explainSelectionStream(reader, text, onDelta, stop))()));
       wrap.appendChild(mkItem("翻译", false, (b, ls) =>
-        runStream(b, ls, "翻译", "翻译中", false, (onDelta) => this.callLLMStream([{ role: "system", content: "You are a professional translator. Translate into " + lang + ". Output only the translation." }, { role: "user", content: text }], onDelta, () => false))()));
+        runStream(b, ls, "翻译", "翻译中", false, (onDelta, stop) => this.callLLMStream([{ role: "system", content: "You are a professional translator. Translate into " + lang + ". Output only the translation." }, { role: "user", content: text }], onDelta, stop))()));
       wrap.appendChild(result);
+      stopEl.style.margin = "2px 7px 4px";
+      wrap.appendChild(stopEl);
       wrap.appendChild(actions);
+      // Restore a previous result for this exact selection: the reader rebuilds
+      // this popup on scroll, which would otherwise erase the explanation.
+      const cached = AIReader._popupCache;
+      if (cached && cached.text === text && cached.raw) {
+        lastResult = cached.raw;
+        result.style.display = "block"; result.style.color = fg; renderMD(cached.raw);
+        if (cached.showActions) actions.style.display = "flex";
+      }
       append(wrap);
     } catch (e) { this.log("popup error: " + e); }
   },
@@ -1608,11 +2343,13 @@ AIReader = {
     } catch (e) { this.log("explain ctx error: " + e); }
     const hist = (key && this._chatStore.get(key)) || [];
     const sys = "You explain excerpts from academic papers clearly and concisely in " + lang +
-      ". 2-4 sentences. Use the paper context and the prior conversation when they help; stay consistent with earlier answers." +
+      ". 2-4 sentences. The paper context and prior conversation are BACKGROUND only — use them to stay consistent, but " +
+      "answer by explaining the selected passage directly. Do NOT comment on, apologise for, or correct earlier messages, " +
+      "and do NOT add meta remarks like “更正”/“上一条”；只输出对选中原文的解释本身。" +
       (ctx ? ("\n\n## 论文相关段落\n" + ctx) : "");
     const messages = [{ role: "system", content: sys }];
     for (const m of hist.slice(-8)) if (m && m.role && m.content) messages.push({ role: m.role, content: m.content });
-    messages.push({ role: "user", content: "请解释下面这段原文（结合论文上下文与我们之前的讨论）：\n“" + text + "”" });
+    messages.push({ role: "user", content: "只解释下面这段原文（可参考上下文，但不要评论之前的对话）：\n“" + text + "”" });
     return messages;
   },
 
@@ -1622,8 +2359,8 @@ AIReader = {
   },
 
   // Streaming explain: emits deltas via onDelta for the popup's live output.
-  async explainSelectionStream(reader, text, onDelta) {
-    return await this.callLLMStream(await this._explainMessages(reader, text), onDelta || (() => {}), () => false);
+  async explainSelectionStream(reader, text, onDelta, shouldStop) {
+    return await this.callLLMStream(await this._explainMessages(reader, text), onDelta || (() => {}), shouldStop || (() => false));
   },
 
   // Copy text to the clipboard from inside the reader webview. Tries Zotero's

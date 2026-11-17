@@ -51,6 +51,15 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  const blocks=await A.extractBlocks(1);
  console.log('blocks:',blocks.length,'| all have pageHeight:',blocks.every(b=>b.pageHeight>0));
  assert(blocks.every(b=>b.pageHeight>0),'pageHeight present');
+ // sentence-level extraction: many fine-grained blocks, each sentence-sized (not
+ // whole paragraphs) and carrying valid rects so a single sentence can be
+ // highlighted / cited / jumped to.
+ { const pos=blocks.filter(b=>b.position&&b.text);
+   const avg=pos.reduce((s,b)=>s+b.text.length,0)/(pos.length||1);
+   assert(blocks.length>200 && avg<400,'blocks are sentence-sized ('+Math.round(avg)+' chars avg)');
+   assert(pos.every(b=>b.position.rects.every(r=>r.length===4&&r[2]>=r[0])),'every positioned block has valid rects');
+   console.log('sentence-level extraction: '+blocks.length+' blocks, avg '+Math.round(avg)+' chars');
+ }
  const byId=new Map(blocks.map(b=>[b.id,b]));
 
  // context includes figure index
@@ -83,6 +92,13 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  console.log('refs:',refs.length,'applies:',applies.length);
  assert(refs.length===1,'one citation badge');
  assert(applies.length===2,'two apply buttons (hl+note)');
+ // multi-id citation ([B1, B2] / [B1–B2]) and B-prefixed directive ([[hl:B1]])
+ { const tb=stubEl();
+   A._renderLines(state, tb, '多引用 [B'+b5.id+', B'+b9.id+']，范围 [B'+b5.id+'–B'+b9.id+']，前缀 [[hl:B'+b5.id+']] 完');
+   assert(collect(tb,'aireader-ref').length===4,'multi-id and range citations render a badge per id');
+   assert(collect(tb,'aireader-apply').length===1,'B-prefixed [[hl:B..]] renders an apply button');
+   console.log('multi-citation + B-prefix directives: OK');
+ }
  // markdown: bold + bullet list
  const bubble2=stubEl();
  A._renderLines(state, bubble2, '**结论**\n- 第一点 [B'+b5.id+']\n- 第二点');
@@ -212,6 +228,11 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  // retrieval context (TF-IDF): returns block-tagged text relevant to query
  const rc=A.buildRetrievedContext(blocks, 'vision encoder pretraining');
  assert(rc.includes('[B')&&rc.length>0,'retrieved context non-empty');
+ // low-signal query (few/no matching tokens) must NOT collapse to headings-only
+ // context — it falls back to the full bounded body so the model isn't fed a
+ // bare table of contents (which made it refuse "只有章节目录…没有正文").
+ const rcLow=A.buildRetrievedContext(blocks, '你试试');
+ assert((rcLow.match(/\[B/g)||[]).length>5 && rcLow.length>1000,'low-signal query falls back to full body, not headings-only');
  console.log('retrieved context chars:',rc.length);
 
  // tokenizer handles latin + CJK
@@ -220,17 +241,176 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
 
  // note HTML generation
  const noteHtml=A.historyToHTML(st, [{role:'user',content:'问题?'},{role:'assistant',content:'**要点**\n- a [B5]\n- b'}]);
- assert(/<h1>/.test(noteHtml)&&/<strong>要点<\/strong>/.test(noteHtml)&&/<li>/.test(noteHtml)&&/\(p/.test(noteHtml),'note HTML has heading/bold/list/citation');
+ assert(/<h1>/.test(noteHtml)&&/<strong>要点<\/strong>/.test(noteHtml)&&/<li>/.test(noteHtml)&&/>p\d|\(p/.test(noteHtml),'note HTML has heading/bold/list/citation');
  console.log('note HTML ok, len',noteHtml.length);
 
- // auto-apply directives → creates annotations
- savedAnnotation=null; let applyCount=0;
- const origSave=ctx.Zotero.Annotations.saveFromJSON;
- ctx.Zotero.Annotations.saveFromJSON=async(a,j)=>{applyCount++; return {key:j.key};};
- const n=await A.autoApplyDirectives(st, 'x [[hl:'+b5.id+']] y [[note:'+b9.id+'|理由]] z');
- ctx.Zotero.Annotations.saveFromJSON=origSave;
- console.log('autoApply created:',n);
- assert(n===2&&applyCount===2,'autoApplyDirectives applied 2');
+ // auto-apply directives: dedupe per block, category→colour, cap, idempotency
+ { const origSave=ctx.Zotero.Annotations.saveFromJSON;
+   let saves=[]; ctx.Zotero.Annotations.saveFromJSON=async(a,j)=>{ saves.push(j); return {key:j.key}; };
+
+   // two DISTINCT blocks → 2 annotations; returns {count,keys,applied}
+   saves=[]; const r1=await A.autoApplyDirectives(st, 'x [[hl:'+b5.id+']] y [[note:'+b9.id+'|理由]] z');
+   assert(r1.count===2 && r1.keys.length===2 && r1.applied.length===2,'autoApply applies 2 distinct blocks');
+
+   // dedupe: hl + note for the SAME block, with a category → ONE green highlight
+   saves=[]; const r2=await A.autoApplyDirectives(st, 'method [[hl:'+b5.id+']] 以及 [[note:'+b5.id+'|因为快]]');
+   assert(r2.count===1 && saves.length===1,'autoApply merges hl+note of one block into one annotation');
+   assert(saves[0].comment==='因为快','merged annotation carries the note comment');
+   assert(saves[0].color===A.CATEGORY_COLORS.method,'category method → green highlight');
+   assert(r2.applied[0].category==='method','applied records the category');
+
+   // cap limits how many are written
+   saves=[]; const r3=await A.autoApplyDirectives(st, '[[hl:'+b5.id+']] [[hl:'+b9.id+']]', {cap:1});
+   assert(r3.count===1,'autoApply respects opts.cap');
+
+   // idempotency: a block already AI-annotated at its spot is skipped
+   const si5=A.sortIndex(b5);
+   const attIdem={ id:7, key:'K2', libraryID:1, getAnnotations:()=>[{annotationSortIndex:si5, hasTag:t=>t==='AI', key:'OLD'}] };
+   const stIdem=Object.assign({}, st, {attachment:attIdem});
+   saves=[]; const r4=await A.autoApplyDirectives(stIdem, '[[hl:'+b5.id+']]');
+   assert(r4.count===0,'autoApply is idempotent — skips a block already AI-annotated');
+
+   ctx.Zotero.Annotations.saveFromJSON=origSave;
+   console.log('autoApplyDirectives dedupe/colour/cap/idempotency: OK');
+ }
+
+ // tool-schema shaping + tool-call parsing round-trip for all three formats
+ { const chatTools=A._toolSchemas('chat'); assert(chatTools[0].type==='function'&&chatTools[0].function.name==='list_sections','chat tool schema shape');
+   const antTools=A._toolSchemas('anthropic'); assert(antTools[0].name==='list_sections'&&antTools[0].input_schema,'anthropic tool schema shape');
+   const respTools=A._toolSchemas('responses'); assert(respTools[0].type==='function'&&respTools[0].name==='list_sections','responses tool schema shape');
+   const chatP=A._parseToolCalls('chat',{choices:[{message:{content:'',tool_calls:[{id:'c1',type:'function',function:{name:'read_section',arguments:'{"index":2}'}}]}}]});
+   assert(chatP.calls.length===1&&chatP.calls[0].name==='read_section'&&chatP.calls[0].args.index===2,'chat tool-call parse');
+   const antP=A._parseToolCalls('anthropic',{content:[{type:'text',text:'ok'},{type:'tool_use',id:'a1',name:'highlight',input:{id:5,category:'method'}}]});
+   assert(antP.calls.length===1&&antP.calls[0].name==='highlight'&&antP.calls[0].args.category==='method'&&antP.text==='ok','anthropic tool-call parse');
+   const respP=A._parseToolCalls('responses',{output:[{type:'function_call',call_id:'r1',name:'finish',arguments:'{}'}]});
+   assert(respP.calls.length===1&&respP.calls[0].name==='finish','responses tool-call parse');
+   console.log('tool schema + parse (chat/anthropic/responses): OK');
+ }
+
+ // agentAnnotate: native tool-calling loop — list_sections → read_section →
+ // highlight×2 → finish; colour-coded, run recorded, undo/redo, tool blocks shown
+ { const origFetch=ctx.fetch, origFL=A._fetchLLM, origSave=ctx.Zotero.Annotations.saveFromJSON;
+   const store=[];
+   ctx.Zotero.Annotations.saveFromJSON=async(a,j)=>{ const it={key:j.key, annotationSortIndex:j.sortIndex, color:j.color, hasTag:t=>t==='AI', eraseTx:async()=>{ const i=store.indexOf(it); if(i>=0) store.splice(i,1); }}; store.push(it); return {key:j.key}; };
+   const sections=A._buildSections(blocks);
+   const sec=sections.find(s=>s.blockIds.length>=2);
+   const id1=sec.blockIds[0]; let id2=null; for(const id of sec.blockIds){ if(A.sortIndex(byId.get(id))!==A.sortIndex(byId.get(id1))){ id2=id; break; } }
+   const script=[
+     {choices:[{message:{content:null,tool_calls:[{id:'t1',type:'function',function:{name:'list_sections',arguments:'{}'}}]}}]},
+     {choices:[{message:{content:null,tool_calls:[{id:'t2',type:'function',function:{name:'read_section',arguments:JSON.stringify({index:sec.index})}}]}}]},
+     {choices:[{message:{content:null,tool_calls:[
+        {id:'t3',type:'function',function:{name:'highlight',arguments:JSON.stringify({id:id1,category:'contribution',reason:'核心主张'})}},
+        {id:'t4',type:'function',function:{name:'highlight',arguments:JSON.stringify({id:id2,category:'method',reason:'做法'})}}]}}]},
+     {choices:[{message:{content:null,tool_calls:[{id:'t5',type:'function',function:{name:'finish',arguments:'{}'}}]}}]},
+   ];
+   let step=0;
+   A._fetchLLM=async()=>{ const d=script[Math.min(step,script.length-1)]; step++; return {ok:true,status:200,async text(){return JSON.stringify(d);}}; };
+   const att={ id:7, key:'KA', libraryID:1, getAnnotations:()=>store.slice() };
+   const stA={ attachment:att, blocks, doc, status:stubEl(), chatMsgs:stubEl(), send:stubEl() };
+   await A.agentAnnotate(stA);
+   assert(stA._lastRun && stA._lastRun.keys.length===2,'agentAnnotate applied 2 sentence highlights via tools');
+   assert(store.some(s=>s.color===A.CATEGORY_COLORS.contribution) && store.some(s=>s.color===A.CATEGORY_COLORS.method),'agentAnnotate colours by category');
+   assert(collect(stA.chatMsgs,'aireader-tool').length>=4,'tool-interaction blocks rendered in the bubble');
+   const removed=await A.undoRun(stA);
+   assert(removed===2 && store.length===0,'undoRun erases exactly this run');
+   const redone=await A.redoRun(stA);
+   assert(redone===2 && store.length===2,'redoRun re-creates exactly what undo removed');
+   A._fetchLLM=origFL; ctx.fetch=origFetch; ctx.Zotero.Annotations.saveFromJSON=origSave;
+   console.log('agentAnnotate tool-loop + undo + redo: OK');
+ }
+
+ // agent is resilient: an unknown tool returns an error result (no crash), loop finishes
+ { const origFL=A._fetchLLM, origSave=ctx.Zotero.Annotations.saveFromJSON;
+   ctx.Zotero.Annotations.saveFromJSON=async(a,j)=>({key:j.key});
+   const script=[
+     {choices:[{message:{content:null,tool_calls:[{id:'u1',type:'function',function:{name:'bogus_tool',arguments:'{}'}}]}}]},
+     {choices:[{message:{content:null,tool_calls:[{id:'u2',type:'function',function:{name:'finish',arguments:'{}'}}]}}]},
+   ];
+   let step=0; A._fetchLLM=async()=>{ const d=script[Math.min(step,script.length-1)]; step++; return {ok:true,status:200,async text(){return JSON.stringify(d);}}; };
+   const stB={ attachment:{id:7,key:'KB',libraryID:1,getAnnotations:()=>[]}, blocks, doc, status:stubEl(), chatMsgs:stubEl(), send:stubEl() };
+   let threw=false; try { await A.agentAnnotate(stB); } catch(e){ threw=true; }
+   assert(!threw && stB._lastRun && stB._lastRun.keys.length===0,'agent survives an unknown tool and finishes with 0 annotations');
+   A._fetchLLM=origFL; ctx.Zotero.Annotations.saveFromJSON=origSave;
+   console.log('agent unknown-tool resilience: OK');
+ }
+
+ // _streamAnswer: accumulates tool-call fragments across streamed chat deltas
+ { const origFL=A._fetchLLM;
+   const sseFrames=(frames)=>{ const enc=new TextEncoder(); let i=0; return {getReader(){return {async read(){ if(i>=frames.length) return {done:true}; return {done:false, value: enc.encode('data: '+JSON.stringify(frames[i++])+'\n')}; }};}}; };
+   const frames=[
+     {choices:[{delta:{content:'思考…'}}]},
+     {choices:[{delta:{tool_calls:[{index:0,id:'x1',function:{name:'read_section',arguments:'{"in'}}]}}]},
+     {choices:[{delta:{tool_calls:[{index:0,function:{arguments:'dex":2}'}}]}}]},
+   ];
+   A._fetchLLM=async()=>({ok:true,status:200,body:sseFrames(frames),async text(){return '';}});
+   let got='';
+   const r=await A._streamAnswer([{role:'user',content:'x'}], A._toolSchemas('chat'), d=>{got+=d;}, ()=>false, {});
+   A._fetchLLM=origFL;
+   assert(got==='思考…','_streamAnswer streams text deltas');
+   assert(r.calls.length===1 && r.calls[0].name==='read_section' && r.calls[0].args.index===2,'_streamAnswer accumulates streamed tool-call fragments');
+   console.log('_streamAnswer streamed tool-call accumulation: OK');
+ }
+
+ // list_figures / view_figure tools: the model can discover and "read" figures
+ { assert(A._toolSchemas('chat').length===6,'tool schema includes list_figures + view_figure');
+   const figBlocks=blocks.filter(b=>(b.type==='image'||b.type==='table')&&b.position);
+   const c2={ sections:A._buildSections(blocks), byId, run:{keys:[],applied:[]}, tally:{}, reads:0 };
+   const stF={ attachment:{id:7,key:'KF',libraryID:1}, blocks };
+   const lf=await A._execTool(stF, c2, {name:'list_figures', args:{}});
+   assert(JSON.parse(lf.output).length===figBlocks.length,'list_figures returns all figures/tables');
+   if (figBlocks.length) {
+     const origRender=A.renderRegionDataURI, origLLM=A.callLLM;
+     A.renderRegionDataURI=async()=>'data:image/png;base64,ZZZ';
+     A.callLLM=async(msgs)=>{ assert(Array.isArray(msgs[1].content),'view_figure builds a vision message'); return '图中准确率随规模上升'; };
+     const vf=await A._execTool(stF, c2, {name:'view_figure', args:{id:figBlocks[0].id}});
+     A.renderRegionDataURI=origRender; A.callLLM=origLLM;
+     assert(/准确率随规模上升/.test(JSON.parse(vf.output).description),'view_figure returns the vision description');
+   }
+   console.log('list_figures + view_figure: OK ('+figBlocks.length+' figs)');
+ }
+
+ // buildContextBounded: whole body when it fits; head+tail with omission marker when over budget
+ { const fits=A.buildContextBounded(blocks, 1000000);
+   assert(fits.includes('[B'),'bounded context includes blocks when it fits');
+   const over=A.buildContextBounded(blocks, 400);
+   assert(/中间内容略/.test(over),'bounded context marks omitted middle when over budget');
+   console.log('buildContextBounded: OK');
+ }
+
+ // _compactHistory: folds older turns into a rolling summary, keeps recent 12
+ { const origLLM=A.callLLM; A.callLLM=async()=>'要点摘要X';
+   const h=[]; for(let i=0;i<24;i++) h.push({role:i%2?'assistant':'user', content:'turn'+i});
+   await A._compactHistory('KC', h);
+   A.callLLM=origLLM;
+   assert(h.length===12,'_compactHistory keeps the most recent 12 turns');
+   assert(h[h.length-1].content==='turn23','_compactHistory preserves the latest turn');
+   assert(A._histSummary.get('KC')==='要点摘要X','_compactHistory stores a rolling summary');
+   console.log('_compactHistory: OK');
+ }
+
+ // _fetchLLM: retries once on a network error, never on an HTTP error
+ { const origFetch=ctx.fetch; let calls=0;
+   ctx.fetch=async()=>{ calls++; if(calls===1) throw new Error('Connection reset by peer'); return {ok:true,status:200,async text(){return '{}';}}; };
+   const resp=await A._fetchLLM('https://x/v1/chat',{method:'POST'},{retries:1,timeoutMs:1000});
+   assert(calls===2 && resp.ok,'_fetchLLM retries once on a network error then succeeds');
+   calls=0; ctx.fetch=async()=>{ calls++; return {ok:false,status:500,async text(){return 'err';}}; };
+   const r2=await A._fetchLLM('https://x/v1/chat',{method:'POST'},{retries:1});
+   assert(calls===1 && r2.status===500,'_fetchLLM does not retry HTTP errors');
+   ctx.fetch=origFetch;
+   console.log('_fetchLLM timeout/retry: OK');
+ }
+
+ // _figureDigest: one-line vision description folded in (bounded)
+ { const origRender=A.renderRegionDataURI, origLLM=A.callLLM;
+   A.renderRegionDataURI=async()=>'data:image/png;base64,ZZZ';
+   A.callLLM=async()=>'展示了准确率随层数上升';
+   const figBlocks=blocks.filter(b=>(b.type==='image'||b.type==='table')&&b.position);
+   const dig=await A._figureDigest({attachment:{id:7,key:'KF',libraryID:1}, blocks}, 2);
+   A.renderRegionDataURI=origRender; A.callLLM=origLLM;
+   if (figBlocks.length) assert(/图表视觉摘要/.test(dig)&&/展示了/.test(dig),'_figureDigest returns a vision digest');
+   else assert(dig==='','_figureDigest empty when no figures');
+   console.log('_figureDigest: OK ('+figBlocks.length+' figs)');
+ }
 
  // stop: shouldStop() halts streaming early
  let got=''; const full2=await A.callLLMStream([{role:'user',content:'x'}], d=>{got+=d;}, ()=>true);

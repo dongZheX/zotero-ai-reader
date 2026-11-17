@@ -48,6 +48,92 @@
   cursor: pointer;
 }
 .aireader-top-btn:hover { border-color: var(--air-accent); color: var(--air-accent); }
+/* agentic "read & annotate" trigger — subtly emphasized */
+.aireader-top-agent { border-color: var(--air-accent); color: var(--air-accent); }
+.aireader-top-agent:hover { background: var(--air-accent); color: #fff; }
+/* deep-read toggle */
+.aireader-deep { font-size: 11px; }
+.aireader-deep-on { border-color: var(--accent-green, #3fae5a); color: #fff; background: var(--accent-green, #3fae5a); }
+.aireader-deep-on:hover { border-color: var(--accent-green, #3fae5a); color: #fff; }
+
+/* ---- agentic read & annotate: live progress log + summary ---- */
+.aireader-agentlog { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 6px; }
+.aireader-agentlog-line {
+  font-size: 11.5px; color: var(--air-muted); cursor: pointer; text-decoration: none;
+  padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.aireader-agentlog-line:hover { color: var(--air-accent); }
+.aireader-agent-sum { font-weight: 650; margin: 4px 0 4px; }
+.aireader-agent-legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 8px; }
+.aireader-agent-legenditem { font-size: 11.5px; padding-bottom: 1px; }
+
+/* ---- agentic tool timeline (collapsible tool blocks) ---- */
+/* min-width:0 / max-width:100% throughout so long Chinese briefs ellipsize
+   inside the panel instead of overflowing past the right edge. */
+.aireader-toollog { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; max-width: 100%; min-width: 0; }
+.aireader-tool {
+  border: 1px solid var(--air-border);
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 100%;
+  min-width: 0;
+}
+.aireader-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  background: var(--air-bubble);
+  font-size: 12px;
+  min-width: 0;
+}
+.aireader-tool-header:hover { background: color-mix(in srgb, var(--air-accent) 10%, transparent); }
+.aireader-tool-arrow { font-size: 11px; color: var(--air-muted); transition: transform .12s; flex: 0 0 auto; }
+.aireader-tool-open .aireader-tool-arrow { transform: rotate(90deg); }
+.aireader-tool-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.aireader-tool-name { font-weight: 600; color: var(--air-accent); flex: 0 0 auto; }
+.aireader-tool-brief {
+  color: var(--air-muted); flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.aireader-tool-outcome { margin-inline-start: auto; color: var(--air-muted); font-size: 11px; flex: 0 0 auto; }
+.aireader-tool-body {
+  display: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fill-secondary, inherit);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 10px;
+  border-top: 1px solid var(--air-border);
+}
+.aireader-tool-open .aireader-tool-body { display: block; }
+.aireader-tool-thought { font-size: 12px; color: var(--air-muted); margin: 4px 0; white-space: pre-wrap; word-break: break-word; }
+/* per-round answer container inside an assistant bubble (chat tool-loop) */
+.aireader-answer:empty { display: none; }
+.aireader-answer + .aireader-answer { margin-top: 6px; }
+
+/* grouped run of same-type calls → "读取章节 × N", collapsed by default */
+.aireader-toolgroup { max-width: 100%; min-width: 0; }
+.aireader-toolgroup-header {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 10px; font-size: 12px; cursor: pointer;
+  border: 1px dashed var(--air-border); border-radius: 8px;
+  background: var(--air-bubble); min-width: 0;
+}
+.aireader-toolgroup-header:hover { background: color-mix(in srgb, var(--air-accent) 10%, transparent); }
+.aireader-toolgroup-count { color: var(--air-muted); font-size: 11px; }
+.aireader-toolgroup-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* a multi-group collapses its body until opened */
+.aireader-toolgroup-multi .aireader-toolgroup-body { display: none; }
+.aireader-toolgroup-multi.aireader-toolgroup-open .aireader-toolgroup-body { display: flex; }
+.aireader-toolgroup-multi .aireader-toolgroup-header .aireader-tool-arrow { transition: transform .12s; }
+.aireader-toolgroup-multi.aireader-toolgroup-open .aireader-toolgroup-header .aireader-tool-arrow { transform: rotate(90deg); }
 
 /* ---- assistant message action row ---- */
 .aireader-actions { display: flex; gap: 12px; margin: 4px 2px 0; }

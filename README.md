@@ -7,7 +7,7 @@
 <p>Read papers with an AI assistant inside Zotero's item pane. Answers cite the source, and a click on any page badge jumps back to that spot in the PDF.</p>
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.7.2-3b7ddd?style=flat-square"/>
+  <img alt="version" src="https://img.shields.io/badge/version-0.8.0-3b7ddd?style=flat-square"/>
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7 · 8 · 10 · 11-cc2936?style=flat-square&logo=zotero&logoColor=white"/>
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
@@ -38,6 +38,7 @@ Two things make it more than a chat box:
 | **Grounded chat** | The whole paper is injected as context. Streaming Markdown output with `marked` + KaTeX for bold, lists, tables, code, and `$…$` / `$$…$$` math. Token and context usage shown per message. |
 | **Click-to-source** | `[B<id>]` citations render as page badges. Click to jump and highlight the matching block in the reader. |
 | **AI annotations** | The model proposes highlights/notes; you apply them with one click as native annotations. The `✕` removes every annotation it added at that spot. |
+| **Agentic read & annotate** | One click (**✨ 通读并标注**) sends the agent through the whole paper and applies colour-coded highlights + notes for the key points — contribution (yellow), method (green), result (blue), limitation (red), key term (purple). Fully automatic, de-duplicated and idempotent, with a live progress log and a one-click **undo this run**. |
 | **Figure & table vision** | Render a figure or table region to an image and send it to a multimodal model, instead of reading only the caption text. |
 | **Selection popup** | Select text in the reader to quote it into the sidebar, explain it (streaming, with a copy button and a one-click "write to PDF annotation"), or translate it. Explanations see the paper context and the recent conversation. |
 | **Your notes as context** | Reads your existing highlights and notes so you can ask "summarize my highlights" or "answer based on my notes". |
