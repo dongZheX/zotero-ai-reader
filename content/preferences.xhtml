@@ -7,6 +7,7 @@
       <label class="aireader-pref-label" data-l10n-id="aireader-prefs-format" control="aireader-format">API format</label>
       <menulist id="aireader-format" native="true" preference="extensions.zotero.aireader.apiFormat">
         <menupopup>
+          <menuitem label="自动（按模型选择） Auto by model" value="auto"/>
           <menuitem label="OpenAI /chat/completions" value="chat"/>
           <menuitem label="OpenAI /responses" value="responses"/>
           <menuitem label="Anthropic /messages" value="anthropic"/>
@@ -70,6 +71,13 @@
                   preference="extensions.zotero.aireader.serperKey"
                   placeholder="serper.dev — required for web_search"/>
     </hbox>
+
+    <vbox>
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-customprompt" control="aireader-customprompt">自定义指令 Custom instructions（追加到系统提示，可留空）</label>
+      <html:textarea id="aireader-customprompt" rows="5" style="flex:1; width:100%; font-family:-moz-fixed; resize:vertical;"
+                     preference="extensions.zotero.aireader.customPrompt"
+                     placeholder="例如：多用列表、保留英文术语、回答更简短、特定领域偏好…（不会覆盖引用/工具/画图规则）"/>
+    </vbox>
 
     <hbox align="center">
       <button id="aireader-test" data-l10n-id="aireader-prefs-test" label="Test connection"/>

@@ -63,7 +63,7 @@
 
 | 项 | 说明 | 示例 |
 |---|---|---|
-| 接口格式 | `chat-completions`、`responses` 或 `anthropic` | OpenAI `/chat/completions` |
+| 接口格式 | **自动**按模型名选择（Claude → `/messages`，OpenAI → `/responses`）；也可手动指定 `chat-completions` / `responses` / `anthropic` | 自动 |
 | Base URL | 接口根地址；只填主机名会自动补 `/v1`，`http` 自动升级为 `https` | `https://api.openai.com/v1` |
 | API Key | 你的密钥 | `sk-…` |
 | Model | 模型名 | `gpt-5` · `deepseek-chat` · `claude-opus-5-5` |
@@ -72,6 +72,7 @@
 | 最大发送字符数 | 注入正文的上限 | `60000` |
 | 最大输出 token | `0` 表示不限制（避免长总结被截断） | `0` |
 | Serper API Key | 启用 `web_search` 联网搜索（来自 [serper.dev](https://serper.dev)），可选 | — |
+| 自定义指令 | 追加到系统提示的额外要求（风格、术语处理、格式偏好），不会覆盖引用/工具/画图规则，可选 | — |
 
 点 **测试连接** 验证配置。
 
@@ -126,6 +127,8 @@ node test/sim.js   # → ALL OK
 | [papersgpt/papersgpt-for-zotero](https://github.com/papersgpt/papersgpt-for-zotero) | Zotero 内 AI 问答的工程实践 |
 | [cboulanger/zotero-skills](https://github.com/cboulanger/zotero-skills) | AI 与 Zotero 协作的接口思路 |
 | [stark1tty/zotero-AI-Butler](https://github.com/stark1tty/zotero-AI-Butler-english)（原作 steven-jianhao-li） | Prompt 模板、右键生成、笔记排版 |
+| [blader/humanizer](https://github.com/blader/humanizer) | 回答风格指南里的去 AI 味规则（基于 Wikipedia「Signs of AI writing」） |
+| `artifact-design` skill | SVG 绘图规则里「避免 AI 设计套路」的指导 |
 
 ## 许可
 

@@ -569,6 +569,31 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  }
  // the model is steered to SVG, and the heavy mermaid lib / iframe page are gone
  assert(/```svg/.test(A.systemPrompt('x')),'system prompt steers diagrams to svg');
+ assert(/AI 设计套路/.test(A.systemPrompt('x'))&&/emoji/.test(A.systemPrompt('x')),'svg guidance avoids AI-design clichés');
+ // de-AI style guide is injected into answers (anti-cliché + term/translation rules)
+ { const sp=A.systemPrompt('x');
+   assert(/表达风格/.test(sp)&&/AI 腔/.test(sp),'system prompt carries the style guide');
+   assert(/gold/.test(sp)&&/生硬直译/.test(sp),'style guide covers term/translation (no gold→黄金)');
+   assert(/彰显|赋能|值得注意的是/.test(A._styleGuide()),'style guide bans AI filler words');
+ }
+ // custom instructions from settings are appended to the system prompt
+ { prefs['aireader.customPrompt']='请多用列表，保留英文术语';
+   const sp=A.systemPrompt('x');
+   assert(/用户自定义要求/.test(sp)&&/请多用列表/.test(sp),'custom prompt appended to system prompt');
+   delete prefs['aireader.customPrompt'];
+   assert(!/用户自定义要求/.test(A.systemPrompt('x')),'no custom block when setting is empty');
+ }
+ // auto API format by model name: claude→anthropic, openai→responses, else→chat
+ assert(A._autoFmt('claude-opus-5-5')==='anthropic','claude → anthropic /messages');
+ assert(A._autoFmt('gpt-5')==='responses' && A._autoFmt('o3-mini')==='responses','openai → /responses');
+ assert(A._autoFmt('deepseek-chat')==='chat' && A._autoFmt('qwen2.5')==='chat','unknown/compat gateway → chat fallback');
+ { const sf=prefs['aireader.apiFormat'], sm=prefs['aireader.model'];
+   prefs['aireader.apiFormat']='auto'; prefs['aireader.model']='claude-sonnet-5-5';
+   assert(A._fmt()==='anthropic','_fmt() auto resolves anthropic from model');
+   prefs['aireader.model']='gpt-4o'; assert(A._fmt()==='responses','_fmt() auto resolves responses from model');
+   prefs['aireader.apiFormat']='chat'; prefs['aireader.model']='claude-x'; assert(A._fmt()==='chat','explicit format overrides auto');
+   prefs['aireader.apiFormat']=sf; prefs['aireader.model']=sm;
+ }
  assert(!fs.existsSync(path.join(__dirname,'..','content','vendor','mermaid.min.js')),'heavy mermaid lib removed');
  assert(!fs.existsSync(path.join(__dirname,'..','content','artifact.html')),'dead iframe render page removed');
  // _sanitizeArtifact strips scripts/handlers but keeps <style> for SVG fidelity

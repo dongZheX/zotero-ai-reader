@@ -715,8 +715,32 @@ AIReader = {
       "3) 当用户要求划线/标注，或你认为某处值得高亮时，可输出指令：划线用 [[hl:<id>]]，加批注用 [[note:<id>|批注内容]]。这些会渲染成按钮由用户一键应用到 PDF。\n" +
       "4) 当用户想看某个图/表的视觉内容、或你需要看图才能准确解释时，输出 [[fig:<id>]]（id 为图/表块），会渲染该区域图像并交给多模态模型识图。\n" +
       "5) 若正文前附有【用户在 PDF 中的高亮与批注】，当用户问到『我的高亮/批注』时请优先结合这些内容回答。\n" +
-      "6) 需要用图示说明（流程、架构、时间线、关系等）时，请输出一个 ```svg 代码块，会被内联渲染成矢量图。要点：用 <rect>/<text>/<line>/<path>/<polygon> 等手绘；根 <svg> 必须带 viewBox 定义坐标系（不要写固定像素 width/height，会自适应容器宽度）；viewBox 宽度建议 ≤ 600，框与文字不要重叠、箭头对齐、字号适中；颜色用柔和填充。不要用 mermaid（本环境无法渲染，只会显示源码）。仅在确实有助于理解时才画。\n\n" +
+      "6) 需要用图示说明（流程、架构、时间线、关系等）时，请输出一个 ```svg 代码块，会被内联渲染成矢量图。要点：用 <rect>/<text>/<line>/<path>/<polygon> 等手绘；根 <svg> 必须带 viewBox 定义坐标系（不要写固定像素 width/height，会自适应容器宽度）；viewBox 宽度建议 ≤ 600，框与文字不要重叠、箭头对齐、字号分层、留白充足、元素对齐。审美上避免 AI 设计套路：配色克制（中性色带一点偏向强调色的色相、再加一个强调色，别用纯灰；别套用米色+衬线+赭石、紫蓝渐变、荧光绿点缀这类默认风格），不要用 emoji、不要什么都居中或一律圆角；编号(01/02/03)只在内容确实是有序步骤时才用。不要用 mermaid（本环境无法渲染，只会显示源码）。仅在确实有助于理解时才画。\n\n" +
+      this._styleGuide() +
+      this._customPrompt() +
       "论文内容：\n\n" + ctx;
+  },
+
+  // User-defined extra instructions from Settings. Appended (not a replacement)
+  // so it can't break the citation / tool / drawing machinery above.
+  _customPrompt() {
+    const c = (this.getPref("customPrompt") || "").trim();
+    return c ? ("【用户自定义要求】（在不破坏上述引用/工具/画图规则的前提下遵循）\n" + c + "\n\n") : "";
+  },
+
+  // Style constraints injected into every answer so output reads human-written,
+  // not model-generic. Condensed from the "Signs of AI writing" rules (the
+  // humanizer skill) plus Chinese sci-writing term/translation handling —
+  // because a bootstrap plugin has no skills, only the system prompt.
+  _styleGuide() {
+    return "【表达风格】像懂行的人跟同行说话：直接、具体、克制，别带 AI 腔。\n" +
+      "- 先说结论，别铺垫；不要“让我们深入探讨 / 首先需要明确 / 综上所述”这类套路开场和升华式收尾，也别用“这不仅是 X，更是 Y”的句式或金句式独句结尾。\n" +
+      "- 不堆排比和“三件套”，该列几点就几点；少用破折号串句，多用短句和句号。\n" +
+      "- 不用空话套话与夸大词（如“值得注意的是 / 不言而喻 / 彰显 / 赋能 / 生态 / 闭环 / 助力 / 至关重要 / 深刻洞察 / 一探究竟”），换成平实的说法。\n" +
+      "- 不写“专家认为 / 研究表明”这类空泛背书；有依据就用 [B<id>] 指向原文，没有就别编。\n" +
+      "- 不用装饰性加粗和 emoji，小标题用普通短语；不复述问题，不说“希望对你有帮助”之类客套。\n" +
+      "- 术语按中文科技写作习惯处理：模型名、指标名、专业名词、英文缩写（如 SFT、RLHF、VQA、gold label/gold data）保留原文，不要生硬直译——例如 gold 在“gold 数据 / 黄金标准”语境里不要译成“黄金”；没有通行译名就保留英文并在括号里给出解释。\n" +
+      "- 无论用哪种语言回答，都遵循以上风格，读起来像人写的，而不是模板。\n\n";
   },
 
   // ---------------------------------------------------------------- chat UI
@@ -2175,7 +2199,20 @@ AIReader = {
   },
 
   // ---------------------------------------------------------------- LLM
-  _fmt() { const f = (this.getPref("apiFormat") || "chat").trim(); return ["chat", "responses", "anthropic"].includes(f) ? f : "chat"; },
+  _fmt() {
+    const f = (this.getPref("apiFormat") || "auto").trim();
+    if (["chat", "responses", "anthropic"].includes(f)) return f; // explicit user choice wins
+    return this._autoFmt(this.getPref("model")); // "auto" (or anything unknown) → pick by model name
+  },
+  // Map a model name to its best-fit API format: Claude → Anthropic /messages,
+  // OpenAI → /responses; otherwise fall back to /chat/completions (the only
+  // format most compatible gateways — DeepSeek, Moonshot, Qwen, Ollama… — speak).
+  _autoFmt(model) {
+    const m = (model || "").toLowerCase();
+    if (/claude/.test(m)) return "anthropic";
+    if (/\bgpt\b|gpt-|^o[1-9]|\bo[1-9]-|openai|davinci|text-(davinci|embedding)/.test(m)) return "responses";
+    return "chat";
+  },
   _normBase() {
     let b = (this.getPref("baseURL") || "").trim().replace(/\/+$/, "");
     if (!b) return b;
@@ -2519,8 +2556,10 @@ AIReader = {
     const sys = "You explain excerpts from academic papers clearly and concisely in " + lang +
       ". 2-4 sentences. The paper context and prior conversation are BACKGROUND only — use them to stay consistent, but " +
       "answer by explaining the selected passage directly. Do NOT comment on, apologise for, or correct earlier messages, " +
-      "and do NOT add meta remarks like “更正”/“上一条”；只输出对选中原文的解释本身。" +
-      (ctx ? ("\n\n## 论文相关段落\n" + ctx) : "");
+      "and do NOT add meta remarks like “更正”/“上一条”；只输出对选中原文的解释本身。\n\n" +
+      this._styleGuide() +
+      this._customPrompt() +
+      (ctx ? ("## 论文相关段落\n" + ctx) : "");
     const messages = [{ role: "system", content: sys }];
     for (const m of hist.slice(-8)) if (m && m.role && m.content) messages.push({ role: m.role, content: m.content });
     messages.push({ role: "user", content: "只解释下面这段原文（可参考上下文，但不要评论之前的对话）：\n“" + text + "”" });

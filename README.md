@@ -63,7 +63,7 @@ Open **Settings → AI Reader**:
 
 | Field | Notes | Example |
 |---|---|---|
-| API format | `chat-completions`, `responses`, or `anthropic` | OpenAI `/chat/completions` |
+| API format | **Auto** picks by model name (Claude → `/messages`, OpenAI → `/responses`); or force `chat-completions` / `responses` / `anthropic` | Auto |
 | Base URL | Root endpoint; a bare host gets `/v1` appended, `http` is upgraded to `https` | `https://api.openai.com/v1` |
 | API Key | Your key | `sk-…` |
 | Model | Model name | `gpt-5` · `deepseek-chat` · `claude-opus-5-5` |
@@ -72,6 +72,7 @@ Open **Settings → AI Reader**:
 | Max characters | Upper bound on injected body text | `60000` |
 | Max output tokens | `0` means no limit (avoids truncated summaries) | `0` |
 | Serper API Key | Enables `web_search` (from [serper.dev](https://serper.dev)); optional | — |
+| Custom instructions | Extra guidance appended to the system prompt (style, term handling, format preferences); won't override citation/tool/drawing rules; optional | — |
 
 Use **Test connection** to check the setup.
 
@@ -126,6 +127,8 @@ The design borrows from several projects:
 | [papersgpt/papersgpt-for-zotero](https://github.com/papersgpt/papersgpt-for-zotero) | In-Zotero Q&A engineering |
 | [cboulanger/zotero-skills](https://github.com/cboulanger/zotero-skills) | Interface ideas for AI/Zotero interaction |
 | [stark1tty/zotero-AI-Butler](https://github.com/stark1tty/zotero-AI-Butler-english) (orig. steven-jianhao-li) | Prompt templates, right-click generation, note formatting |
+| [blader/humanizer](https://github.com/blader/humanizer) | The de-AI writing rules behind the answer style guide (based on Wikipedia's "Signs of AI writing") |
+| `artifact-design` skill | The "avoid AI-generated design" guidance behind the SVG diagram rules |
 
 ## License
 

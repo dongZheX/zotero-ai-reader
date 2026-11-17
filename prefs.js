@@ -1,4 +1,4 @@
-pref("extensions.zotero.aireader.apiFormat", "chat");
+pref("extensions.zotero.aireader.apiFormat", "auto");
 pref("extensions.zotero.aireader.baseURL", "https://api.openai.com/v1");
 pref("extensions.zotero.aireader.apiKey", "");
 pref("extensions.zotero.aireader.model", "gpt-4o-mini");
@@ -7,3 +7,4 @@ pref("extensions.zotero.aireader.temperature", "0.3");
 pref("extensions.zotero.aireader.maxChars", 60000);
 pref("extensions.zotero.aireader.maxTokens", 0);
 pref("extensions.zotero.aireader.serperKey", "");
+pref("extensions.zotero.aireader.customPrompt", "");
