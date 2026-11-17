@@ -79,6 +79,19 @@ Tests are a headless Node simulation in `test/sim.js`.
 - **Streaming autoscroll:** only stick to the bottom when the user is already
   near the bottom, so they can scroll up to read history mid-stream without
   being yanked back.
+- **Right-side overflow is a recurring bug — there is now ONE structural fix,
+  don't patch it per-component.** A single unbreakable child (a long URL, an
+  English tool brief, a wide artifact/table) pushes the whole assistant message
+  wider than the panel, and because the message area is a flex column, a flex
+  item with the default `min-width:auto` won't shrink below its min-content → the
+  content is laid out too wide and clipped at the right edge. The fix is a
+  catch-all in `style.css`: `.aireader-msg-assistant .aireader-bubble, … *
+  { max-width:100%; min-width:0 }` plus `min-width:0` on `.aireader-msg` and
+  wrap rules on `a`/`pre`/`table`. Any NEW component rendered inside an assistant
+  bubble inherits this for free. `test/sim.js` asserts these selectors exist, so
+  a refactor that drops them fails the tests. If overflow reappears, the child is
+  almost certainly escaping the bubble (rendered outside `.aireader-msg-assistant
+  .aireader-bubble`) — fix the DOM nesting, don't add another width hack.
 
 ### Selection popup
 

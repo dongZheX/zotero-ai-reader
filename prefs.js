@@ -6,3 +6,4 @@ pref("extensions.zotero.aireader.language", "中文");
 pref("extensions.zotero.aireader.temperature", "0.3");
 pref("extensions.zotero.aireader.maxChars", 60000);
 pref("extensions.zotero.aireader.maxTokens", 0);
+pref("extensions.zotero.aireader.serperKey", "");

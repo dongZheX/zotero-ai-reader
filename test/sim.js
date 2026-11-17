@@ -352,7 +352,7 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  }
 
  // list_figures / view_figure tools: the model can discover and "read" figures
- { assert(A._toolSchemas('chat').length===6,'tool schema includes list_figures + view_figure');
+ { delete prefs['aireader.serperKey']; assert(A._toolSchemas('chat').length===7,'tool schema: 5 paper tools + web_fetch + finish (no web_search without Serper key)');
    const figBlocks=blocks.filter(b=>(b.type==='image'||b.type==='table')&&b.position);
    const c2={ sections:A._buildSections(blocks), byId, run:{keys:[],applied:[]}, tally:{}, reads:0 };
    const stF={ attachment:{id:7,key:'KF',libraryID:1}, blocks };
@@ -541,6 +541,92 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  // navigation
  await A.navigateTo(7, posBlock);
  assert(opened && Number.isInteger(opened.loc.position.pageIndex),'navigate shape');
+
+ // ---- model-drawn artifacts (mermaid / svg / html) srcdoc generation ----
+ const mmd=A._artifactSrcdoc('mermaid','graph TD; A-->B');
+ assert(/<pre class="mermaid">/.test(mmd),'mermaid wrapped in .mermaid pre');
+ assert(mmd.includes('graph TD; A--&gt;B'),'mermaid source escaped into pre');
+ assert(mmd.includes('mermaid@11'),'mermaid loader embedded');
+ assert(mmd.includes('渲染失败'),'mermaid degrades gracefully on failure');
+ assert(mmd.includes('__aireaderH'),'artifact posts its height to parent');
+ const svg=A._artifactSrcdoc('svg','<svg viewBox="0 0 10 10"><rect/></svg>');
+ assert(svg.includes('<svg viewBox="0 0 10 10">'),'svg injected verbatim for rendering');
+ const htm=A._artifactSrcdoc('html','<b>hi</b>');
+ assert(htm.includes('<b>hi</b>')&&htm.includes('<!doctype html>'),'html wrapped in sandbox doc');
+ // _renderArtifacts swaps a fenced code block for a sandboxed iframe
+ (function(){
+   const code=stubEl(); code.className='language-mermaid'; code.textContent='graph TD; X-->Y';
+   const pre=stubEl(); pre.tagName='pre'; pre.appendChild(code);
+   const root=stubEl(); root.appendChild(pre);
+   code.parentNode=pre; pre.parentNode=root;
+   root.querySelectorAll=(sel)=> sel==='pre > code' ? [code] : [];
+   let replaced=null;
+   root.replaceChild=(nw,old)=>{ replaced={nw,old}; };
+   A._renderArtifacts({doc}, root);
+   assert(replaced && replaced.old===pre,'fenced mermaid block replaced');
+   assert(replaced.nw && collect(replaced.nw,'aireader-artifact-frame').length===1,'replacement contains sandbox iframe');
+ })();
+ console.log('artifacts (mermaid/svg/html srcdoc + fenced swap): OK');
+
+ // ---- web tools: web_search (Serper) + web_fetch ----
+ // _htmlToText: strip markup, keep title + readable text
+ const ht=A._htmlToText('<html><head><title>Hi &amp; Bye</title><style>x{}</style></head><body><nav>menu</nav><p>Hello <b>world</b></p><script>bad()</script><li>one</li></body></html>');
+ assert(ht.title==='Hi & Bye','html title extracted + entity decoded');
+ assert(/Hello world/.test(ht.text),'html body text kept');
+ assert(!/bad\(\)/.test(ht.text) && !/menu/.test(ht.text),'script/nav stripped');
+ assert(/• one/.test(ht.text),'list item bulletized');
+ console.log('_htmlToText: OK');
+
+ // tool gating: web_search only present when a Serper key is configured; web_fetch always
+ delete prefs['aireader.serperKey'];
+ let names=A._agentTools().map(t=>t.name);
+ assert(!names.includes('web_search'),'no web_search without Serper key');
+ assert(names.includes('web_fetch'),'web_fetch always available');
+ prefs['aireader.serperKey']='test-serper-key';
+ names=A._agentTools().map(t=>t.name);
+ assert(names.includes('web_search')&&names.includes('web_fetch'),'web_search appears once Serper key is set');
+ // web_search schema shaped per format
+ const wsChat=A._toolSchemas('chat').find(t=>t.function&&t.function.name==='web_search');
+ const wsAnth=A._toolSchemas('anthropic').find(t=>t.name==='web_search');
+ assert(wsChat&&wsChat.function.parameters.required.includes('query'),'web_search chat schema');
+ assert(wsAnth&&wsAnth.input_schema,'web_search anthropic schema (input_schema)');
+
+ // webSearch: normalizes Serper response via stubbed _fetchLLM; errors without key
+ { const origFL=A._fetchLLM;
+   A._fetchLLM=async(url,opts)=>{ assert(/google\.serper\.dev/.test(url),'serper endpoint'); assert(opts.headers['X-API-KEY']==='test-serper-key','serper key header'); return {ok:true,status:200,async text(){return JSON.stringify({organic:[{title:'T1',link:'http://a',snippet:'s1'},{title:'T2',link:'http://b',snippet:'s2'}]});}}; };
+   const rs=await A.webSearch('vacuum rlhf',2);
+   assert(rs.length===2 && rs[0].title==='T1' && rs[0].link==='http://a','webSearch maps organic results');
+   delete prefs['aireader.serperKey'];
+   let threw=false; try{ await A.webSearch('x'); }catch(e){ threw=true; }
+   assert(threw,'webSearch throws without key');
+   prefs['aireader.serperKey']='test-serper-key';
+   A._fetchLLM=origFL;
+ }
+
+ // _execTool routes web_search / web_fetch to render blocks
+ { const origWS=A.webSearch, origWF=A.webFetch;
+   A.webSearch=async()=>[{title:'R',link:'http://r',snippet:'snip'}];
+   A.webFetch=async()=>({title:'Page',text:'body text here'});
+   const r1=await A._execTool(st,{},{name:'web_search',args:{query:'q'}});
+   assert(/联网搜索/.test(r1.render.label) && /1 条/.test(r1.render.outcome),'web_search tool block');
+   assert(JSON.parse(r1.output)[0].link==='http://r','web_search output is JSON results');
+   const r2=await A._execTool(st,{},{name:'web_fetch',args:{url:'https://example.com/p'}});
+   assert(/抓取网页/.test(r2.render.label) && JSON.parse(r2.output).title==='Page','web_fetch tool block + output');
+   const r3=await A._execTool(st,{},{name:'web_fetch',args:{url:'ftp://nope'}});
+   assert(/✕/.test(r3.render.outcome),'web_fetch rejects non-http url');
+   A.webSearch=origWS; A.webFetch=origWF;
+ }
+ delete prefs['aireader.serperKey'];
+ console.log('web tools (search gating + fetch + execTool): OK');
+
+ // ---- layout safety net: assistant bubbles must constrain every descendant so
+ // long URLs / English tool briefs / wide artifacts can't overflow the panel ----
+ { const css=fs.readFileSync(path.join(__dirname,'..','content','style.css'),'utf8').replace(/\s+/g,' ');
+   assert(/\.aireader-msg-assistant \.aireader-bubble \* \{[^}]*min-width: 0/.test(css),'bubble descendants pinned to min-width:0 (overflow safety net)');
+   assert(/\.aireader-msg \{[^}]*min-width: 0/.test(css),'.aireader-msg has min-width:0');
+   assert(/\.aireader-answer \{[^}]*overflow-wrap: anywhere/.test(css),'.aireader-answer wraps long tokens');
+   console.log('layout overflow safety net present: OK');
+ }
 
  console.log('\nALL OK');
 })().catch(e=>{console.error('FAIL',e);process.exit(1);});

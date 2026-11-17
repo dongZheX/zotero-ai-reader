@@ -65,6 +65,13 @@
     </hbox>
 
     <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-serperkey" control="aireader-serperkey">Serper API Key (web search)</label>
+      <html:input id="aireader-serperkey" type="password" style="flex:1;"
+                  preference="extensions.zotero.aireader.serperKey"
+                  placeholder="serper.dev — required for web_search"/>
+    </hbox>
+
+    <hbox align="center">
       <button id="aireader-test" data-l10n-id="aireader-prefs-test" label="Test connection"/>
       <label id="aireader-test-result" style="margin-inline-start: 8px;"/>
     </hbox>

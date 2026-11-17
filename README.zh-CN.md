@@ -7,7 +7,7 @@
 <p>在 Zotero 的条目面板里用 AI 读论文。回答带出处，点一下页码徽标就跳回 PDF 对应的位置。</p>
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.8.0-3b7ddd?style=flat-square"/>
+  <img alt="version" src="https://img.shields.io/badge/version-0.8.1-3b7ddd?style=flat-square"/>
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7 · 8 · 10 · 11-cc2936?style=flat-square&logo=zotero&logoColor=white"/>
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
@@ -40,6 +40,8 @@
 | **AI 写标注** | 模型建议划线/批注，你一键应用为原生标注。`✕` 会把它在那个位置加的标注全部删掉。 |
 | **Agent 通读并标注** | 一键（**✨ 通读并标注**）让 agent 读完整篇论文，自动按类别打上**彩色**高亮+批注——贡献（黄）、方法（绿）、结果（蓝）、局限（红）、关键概念（紫）。全自动、去重且幂等，面板实时显示进度，并提供一键**撤销本次标注**。 |
 | **图表视觉解读** | 把图或表的区域渲染成图像交给多模态模型，而不是只读 caption 文本。 |
+| **联网搜索与抓取** | 模型可调用 `web_search`（Google via Serper，需在设置里填 Serper Key）和 `web_fetch`（把网页读成正文）来核对论文之外的背景、最新进展或术语。`web_fetch` 无需 Key；`web_search` 仅在填入 Serper Key 后出现。 |
+| **对话内画图** | 模型可用 ` ```mermaid `、` ```svg `、` ```html ` 代码块画图，直接在对话里用沙箱 iframe 渲染（脚本与 Zotero 隔离），失败时优雅回退为源码。 |
 | **选中弹窗** | 在阅读器里选中文字，可以引用到侧栏、解释（流式，带复制按钮和一键「写入 PDF 批注」）、或翻译。解释时会参考论文上下文和最近的对话。 |
 | **你的标注作为上下文** | 读取你已有的高亮和笔记，于是可以问「总结我的高亮」「基于我的批注回答」。 |
 | **持久化** | 对话历史按附件保存，下次打开自动恢复。任意一段对话可存为 Zotero 笔记。 |
@@ -67,6 +69,7 @@
 | Temperature | 采样温度 | `0.3` |
 | 最大发送字符数 | 注入正文的上限 | `60000` |
 | 最大输出 token | `0` 表示不限制（避免长总结被截断） | `0` |
+| Serper API Key | 启用 `web_search` 联网搜索（来自 [serper.dev](https://serper.dev)），可选 | — |
 
 点 **测试连接** 验证配置。
 

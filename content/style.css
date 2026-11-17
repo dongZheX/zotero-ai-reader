@@ -115,6 +115,7 @@
 .aireader-tool-open .aireader-tool-body { display: block; }
 .aireader-tool-thought { font-size: 12px; color: var(--air-muted); margin: 4px 0; white-space: pre-wrap; word-break: break-word; }
 /* per-round answer container inside an assistant bubble (chat tool-loop) */
+.aireader-answer { min-width: 0; max-width: 100%; word-break: break-word; overflow-wrap: anywhere; }
 .aireader-answer:empty { display: none; }
 .aireader-answer + .aireader-answer { margin-top: 6px; }
 
@@ -253,7 +254,9 @@
   text-align: center;
 }
 
-.aireader-msg { display: flex; }
+/* min-width:0 lets a message shrink to the scroller width instead of being
+   pushed wider by an unbreakable child (a long URL, an English tool brief). */
+.aireader-msg { display: flex; min-width: 0; max-width: 100%; }
 .aireader-msg-user { justify-content: flex-end; }
 /* Assistant: stack bubble → actions → meta vertically (not squished to the
    right of the bubble, which made "复制"/"重新生成" wrap one char per line). */
@@ -261,6 +264,7 @@
 
 .aireader-bubble {
   max-width: 92%;
+  min-width: 0;
   padding: 9px 12px;
   border-radius: 14px;
   word-break: break-word;
@@ -277,6 +281,14 @@
   border: 1px solid var(--air-border);
   border-bottom-left-radius: 4px;
 }
+/* Structural safety net — stop ANY future descendant (long URL, English tool
+   brief, wide artifact, table) from pushing an assistant bubble past the panel
+   edge. New components get this for free; no per-component whack-a-mole. */
+.aireader-msg-assistant .aireader-bubble,
+.aireader-msg-assistant .aireader-bubble * { max-width: 100%; min-width: 0; }
+.aireader-msg-assistant .aireader-bubble a { overflow-wrap: anywhere; word-break: break-word; }
+.aireader-msg-assistant .aireader-bubble pre,
+.aireader-msg-assistant .aireader-bubble table { display: block; overflow-x: auto; }
 .aireader-bubble.aireader-streaming { white-space: pre-wrap; }
 .aireader-bubble.aireader-streaming::after {
   content: "▋";
@@ -565,6 +577,11 @@
   background: var(--fill-quarternary, rgba(127,127,127,0.14));
 }
 .aireader-rich pre code { background: none; padding: 0; font-size: 11.5px; }
+.aireader-artifact {
+  margin: 8px 0; border: 1px solid var(--air-border, rgba(127,127,127,0.25));
+  border-radius: 8px; overflow: hidden; background: #fff; min-width: 0; max-width: 100%;
+}
+.aireader-artifact-frame { width: 100%; border: 0; display: block; background: #fff; }
 .aireader-rich blockquote {
   margin: 6px 0; padding: 2px 10px; color: var(--air-muted);
   border-inline-start: 3px solid var(--air-border);

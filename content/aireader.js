@@ -714,7 +714,8 @@ AIReader = {
       "2) 在每个关键论断后用 [B<id>] 标出依据的块（可多个），方便用户点回原文。\n" +
       "3) 当用户要求划线/标注，或你认为某处值得高亮时，可输出指令：划线用 [[hl:<id>]]，加批注用 [[note:<id>|批注内容]]。这些会渲染成按钮由用户一键应用到 PDF。\n" +
       "4) 当用户想看某个图/表的视觉内容、或你需要看图才能准确解释时，输出 [[fig:<id>]]（id 为图/表块），会渲染该区域图像并交给多模态模型识图。\n" +
-      "5) 若正文前附有【用户在 PDF 中的高亮与批注】，当用户问到『我的高亮/批注』时请优先结合这些内容回答。\n\n" +
+      "5) 若正文前附有【用户在 PDF 中的高亮与批注】，当用户问到『我的高亮/批注』时请优先结合这些内容回答。\n" +
+      "6) 需要用图示说明（流程、架构、时间线、关系、公式推导示意等）时，可直接画出来并会被渲染：用 ```mermaid 代码块画流程图/时序图/类图等，用 ```svg 画矢量图，用 ```html 画简单可视化。优先用 mermaid；仅在确实有助于理解时才画，不要为画而画。\n\n" +
       "论文内容：\n\n" + ctx;
   },
 
@@ -857,8 +858,12 @@ AIReader = {
       await this._compactHistory(key, hist);
       const sumNote = this._histSummary.get(key);
       const deep = !!this._deepRead;
+      const hasSerper = !!(this.getPref("serperKey") || "").trim();
+      const webNote = (hasSerper
+        ? "需要论文之外的背景、最新进展、术语或相关工作时，可用 web_search 联网搜索、web_fetch 抓取网页正文。"
+        : "需要抓取某个网页正文时可用 web_fetch。");
       const toolNote = "\n\n上面的论文正文可能是节选。你可以调用工具查阅更多内容：list_sections 看章节结构；read_section 读取某一章拿到每句 id；" +
-        "list_figures 列出图表；view_figure 识读某张图/表的视觉内容；highlight 高亮某个句子 id（给 category 和一句话 reason）。" +
+        "list_figures 列出图表；view_figure 识读某张图/表的视觉内容；highlight 高亮某个句子 id（给 category 和一句话 reason）。" + webNote +
         (deep
           ? "【深读模式】回答前请主动用 list_sections + read_section 读取所有相关章节，并对相关图/表 view_figure，确保基于充分证据作答。"
           : "当注入的正文不足以准确回答、或问题涉及具体数据/图表时，请主动调用 read_section / view_figure 查阅后再答；普通问题可直接作答。");
@@ -943,7 +948,7 @@ AIReader = {
   enhanceMessage(state, bubble, text) {
     try {
       if (typeof marked !== "undefined" && marked && typeof marked.parse === "function") {
-        this.renderRich(state, bubble, text);
+        this.renderRich(state, bubble, text, { artifacts: true });
         return;
       }
     } catch (e) { this.log("rich render failed, falling back: " + e); }
@@ -973,7 +978,7 @@ AIReader = {
     return html;
   },
 
-  renderRich(state, bubble, text) {
+  renderRich(state, bubble, text, opts) {
     const doc = state.doc;
     const html = this._mathAndMarkdown(text);
     const tmp = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
@@ -983,6 +988,9 @@ AIReader = {
     bubble.classList.add("aireader-rich");
     while (tmp.firstChild) bubble.appendChild(tmp.firstChild);
     this._linkifyTokens(state, bubble);
+    // Model-drawn diagrams render only on the FINAL pass (not mid-stream), so
+    // mermaid never runs on an incomplete fenced block and iframes aren't rebuilt per delta.
+    if (opts && opts.artifacts) { try { this._renderArtifacts(state, bubble); } catch (e) { this.log("artifacts: " + e); } }
   },
 
   // Strip anything executable from model-produced HTML before insertion.
@@ -997,6 +1005,58 @@ AIReader = {
         }
       });
     } catch (e) {}
+  },
+
+  // ---- model-drawn diagrams (mermaid / svg / html) rendered in a SANDBOXED
+  // iframe so their scripts are isolated from the privileged Zotero window ----
+  _artifactSrcdoc(kind, code) {
+    const head = '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0}body{background:#fff;color:#111;font:13px/1.5 -apple-system,system-ui,"PingFang SC",sans-serif;padding:8px}svg,img{max-width:100%;height:auto}*{box-sizing:border-box}</style></head><body>';
+    const resize = '<scr' + 'ipt>function _h(){try{parent.postMessage({__aireaderH:document.documentElement.scrollHeight},"*")}catch(e){}}window.addEventListener("load",_h);setTimeout(_h,250);setTimeout(_h,900);try{new ResizeObserver(_h).observe(document.body)}catch(e){}</scr' + 'ipt>';
+    if (kind === "mermaid") {
+      return head + '<pre class="mermaid">' + this._escapeHTML(code) + "</pre>" +
+        '<scr' + 'ipt type="module">try{const m=(await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")).default;m.initialize({startOnLoad:false});await m.run();}catch(e){document.body.innerHTML=\'<pre style="color:#b00;white-space:pre-wrap">Mermaid 渲染失败（可能无网络）：\\n\'+' + JSON.stringify(this._escapeHTML(code)) + '+\'</pre>\';}</scr' + 'ipt>' +
+        resize + "</body></html>";
+    }
+    // svg / html: injected as-is (rendered inside the sandbox)
+    return head + code + resize + "</body></html>";
+  },
+  _artifactIframe(doc, kind, code) {
+    const wrap = this._el(doc, "div", "aireader-artifact");
+    const frame = doc.createElementNS("http://www.w3.org/1999/xhtml", "iframe");
+    frame.setAttribute("sandbox", "allow-scripts"); // no allow-same-origin → cannot touch Zotero
+    frame.setAttribute("scrolling", "no");
+    frame.className = "aireader-artifact-frame";
+    frame.style.cssText = "width:100%;height:300px;border:0;display:block;background:#fff;";
+    frame.setAttribute("srcdoc", this._artifactSrcdoc(kind, code));
+    try {
+      const win = doc.defaultView;
+      if (win) win.addEventListener("message", (e) => {
+        if (e.source === frame.contentWindow && e.data && typeof e.data.__aireaderH === "number") {
+          frame.style.height = Math.min(Math.max(e.data.__aireaderH + 6, 60), 680) + "px";
+        }
+      });
+    } catch (e) {}
+    wrap.appendChild(frame);
+    return wrap;
+  },
+  // Replace ```mermaid / ```svg / ```html fenced code blocks with sandboxed
+  // artifact iframes. Runs only on the FINAL render (not mid-stream).
+  _renderArtifacts(state, root) {
+    const doc = state.doc;
+    let codes;
+    try { codes = root.querySelectorAll("pre > code"); } catch (e) { return; }
+    const KIND = { "language-mermaid": "mermaid", "language-svg": "svg", "language-html": "html", "language-xml": "svg" };
+    Array.from(codes || []).forEach((code) => {
+      let kind = null;
+      for (const cls of ((code.className || "") + "").split(/\s+/)) if (KIND[cls]) { kind = KIND[cls]; break; }
+      if (!kind) return;
+      const src = code.textContent || "";
+      if ((kind === "svg") && !/<svg[\s>]/i.test(src)) return;
+      if ((kind === "html") && !/[<&]/.test(src)) return;
+      const pre = code.parentNode;
+      if (!pre || !pre.parentNode) return;
+      try { pre.parentNode.replaceChild(this._artifactIframe(doc, kind, src), pre); } catch (e) { this.log("artifact replace: " + e); }
+    });
   },
 
   // Walk rendered text nodes and turn [B<id>] / [[hl|note|fig:id]] into elements.
@@ -1381,14 +1441,21 @@ AIReader = {
   // ----------------------------------------------- agentic read & annotate
   // Neutral tool declarations (JSON-Schema); shaped per API format by _toolSchemas.
   _agentTools() {
-    return [
+    const T = [
       { name: "list_sections", description: "列出论文的章节大纲（标题、页码、句子数）。先调用它了解结构。", parameters: { type: "object", properties: {}, required: [] } },
       { name: "read_section", description: "读取某一章节的全部句子，返回每句的 id、页码、文本。index 来自 list_sections。", parameters: { type: "object", properties: { index: { type: "integer", description: "章节序号" } }, required: ["index"] } },
       { name: "highlight", description: "在 PDF 里高亮某一句并加一句话批注。id 必须来自 read_section 返回的 id。", parameters: { type: "object", properties: { id: { type: "integer" }, category: { type: "string", enum: ["contribution", "method", "result", "limitation", "keyterm"] }, reason: { type: "string", description: "一句话理由（作为批注）" } }, required: ["id", "category"] } },
       { name: "list_figures", description: "列出论文中的图/表（id、页码、标题）。想看某张图就先用它找到 id。", parameters: { type: "object", properties: {}, required: [] } },
       { name: "view_figure", description: "查看某张图/表的视觉内容：渲染该区域并用多模态模型识读，返回图的文字描述。id 来自 list_figures。", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } },
-      { name: "finish", description: "读完并标注完后调用，结束。", parameters: { type: "object", properties: { note: { type: "string" } }, required: [] } },
     ];
+    // Web search needs a Serper key; only offer it when one is configured so the
+    // model doesn't waste turns calling a tool it can't use.
+    if ((this.getPref("serperKey") || "").trim()) {
+      T.push({ name: "web_search", description: "联网搜索（Google via Serper）。当论文之外的背景、最新进展、术语定义、相关工作需要外部信息时使用。返回标题、链接、摘要。", parameters: { type: "object", properties: { query: { type: "string", description: "搜索关键词" }, num: { type: "integer", description: "返回条数，默认 6，最多 10" } }, required: ["query"] } });
+    }
+    T.push({ name: "web_fetch", description: "抓取某个网页 URL 并返回其正文文本（已去除导航/脚本）。常配合 web_search 使用：先搜索拿到链接，再抓取需要细读的页面。", parameters: { type: "object", properties: { url: { type: "string", description: "http(s) 网址" } }, required: ["url"] } });
+    T.push({ name: "finish", description: "读完并标注完后调用，结束。", parameters: { type: "object", properties: { note: { type: "string" } }, required: [] } });
+    return T;
   },
   _toolSchemas(fmt) {
     const T = this._agentTools();
@@ -1621,8 +1688,75 @@ AIReader = {
         return { output: JSON.stringify({ description: desc }), render: { label: "看图", brief: this.figKind(b.type) + " p" + b.pageLabel, outcome: "→ 已识读", bodyText: desc, jumpId: b.id } };
       } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label: "看图", brief: "p" + b.pageLabel, outcome: "✕ 失败" } }; }
     }
+    if (name === "web_search") {
+      const q = (args.query || "").trim();
+      if (!q) return { output: JSON.stringify({ error: "empty query" }), render: { label: "联网搜索", outcome: "✕ 空查询" } };
+      try {
+        const results = await this.webSearch(q, args.num);
+        return { output: JSON.stringify(results),
+          render: { label: "联网搜索", brief: q, outcome: "→ " + results.length + " 条", bodyText: results.map((r, i) => (i + 1) + ". " + r.title + "\n   " + r.link + "\n   " + (r.snippet || "")).join("\n") || "（无结果）" } };
+      } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label: "联网搜索", brief: q, outcome: "✕ 失败" } }; }
+    }
+    if (name === "web_fetch") {
+      const url = (args.url || "").trim();
+      if (!/^https?:\/\//i.test(url)) return { output: JSON.stringify({ error: "url must start with http(s)://" }), render: { label: "抓取网页", brief: url || "(空)", outcome: "✕ 非法 URL" } };
+      try {
+        const { title, text } = await this.webFetch(url);
+        return { output: JSON.stringify({ url, title, text }),
+          render: { label: "抓取网页", brief: this._urlHost(url), outcome: "→ " + text.length + " 字", bodyText: (title ? title + "\n\n" : "") + text.slice(0, 2000) } };
+      } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label: "抓取网页", brief: this._urlHost(url), outcome: "✕ 失败" } }; }
+    }
     if (name === "finish") return { output: JSON.stringify({ ok: true }), render: { label: "完成", outcome: "✓" }, finish: true };
     return { output: JSON.stringify({ error: "unknown tool " + name }), render: { label: name, outcome: "✕ 未知工具" } };
+  },
+
+  _urlHost(u) { try { return new URL(u).host; } catch (e) { return (u || "").slice(0, 40); } },
+
+  // Google search via Serper (serper.dev). Needs the serperKey pref.
+  async webSearch(query, num) {
+    const key = (this.getPref("serperKey") || "").trim();
+    if (!key) throw new Error("未配置 Serper API Key（设置 → AI Reader）。");
+    const n = Math.max(1, Math.min(10, parseInt(num, 10) || 6));
+    const resp = await this._fetchLLM("https://google.serper.dev/search",
+      { method: "POST", headers: { "X-API-KEY": key, "Content-Type": "application/json" }, body: JSON.stringify({ q: query, num: n }) },
+      { timeoutMs: 20000, retries: 1 });
+    const raw = await resp.text();
+    if (!resp.ok) throw new Error("Serper " + resp.status + "：" + raw.slice(0, 200));
+    const data = this._parseOrThrow(raw);
+    const out = [];
+    if (data.answerBox && (data.answerBox.answer || data.answerBox.snippet)) out.push({ title: data.answerBox.title || "Answer", link: data.answerBox.link || "", snippet: data.answerBox.answer || data.answerBox.snippet });
+    for (const r of (data.organic || [])) { out.push({ title: r.title || "", link: r.link || "", snippet: r.snippet || "" }); if (out.length >= n) break; }
+    return out;
+  },
+
+  // Fetch a web page and reduce it to readable plain text.
+  async webFetch(url) {
+    const resp = await this._fetchLLM(url, { method: "GET", headers: { "User-Agent": "Mozilla/5.0 (ZoteroAIReader)", "Accept": "text/html,application/xhtml+xml,text/plain,*/*" } }, { timeoutMs: 25000, retries: 1 });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const ctype = (resp.headers && resp.headers.get && resp.headers.get("content-type")) || "";
+    const body = await resp.text();
+    if (/application\/json/i.test(ctype)) return { title: "", text: body.slice(0, 16000) };
+    return this._htmlToText(body);
+  },
+
+  _decodeEntities(s) {
+    return (s || "")
+      .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'")
+      .replace(/&#(\d+);/g, (m, d) => { try { return String.fromCharCode(+d); } catch (e) { return ""; } });
+  },
+  // Strip scripts/styles/markup and collapse whitespace into readable text.
+  _htmlToText(html) {
+    let s = html || "";
+    const tm = s.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const title = tm ? this._decodeEntities(tm[1].replace(/\s+/g, " ").trim()) : "";
+    s = s.replace(/<!--[\s\S]*?-->/g, " ");
+    s = s.replace(/<(script|style|noscript|svg|head|nav|footer|header|form|aside)[\s\S]*?<\/\1>/gi, " ");
+    s = s.replace(/<\/(p|div|li|tr|h[1-6]|br|section|article)>/gi, "\n");
+    s = s.replace(/<li[^>]*>/gi, "• ");
+    s = s.replace(/<[^>]+>/g, " ");
+    s = this._decodeEntities(s);
+    s = s.replace(/[ \t ]+/g, " ").replace(/\n{3,}/g, "\n\n").replace(/^\s+|\s+$/gm, "").trim();
+    return { title, text: s.slice(0, 16000) };
   },
 
   // A tool-calling agent: the model LISTS the paper's sections, READS the ones
@@ -1656,7 +1790,8 @@ AIReader = {
     const setHead = () => { headline.textContent = "🔧 阅读并标注中… 第 " + steps + " 步 · 已标注 " + run.keys.length + " 处"; };
 
     const sys = "你是论文精读助手，用" + lang + "工作。任务：通读这篇论文，并在 PDF 里高亮关键句、加简短批注。\n" +
-      "工具：list_sections 看章节结构；read_section 读你选的章节拿到每句 id；highlight 高亮某个句子 id 并给类别和一句话理由；list_figures 列出图表；view_figure 识读某张图/表的视觉内容。\n" +
+      "工具：list_sections 看章节结构；read_section 读你选的章节拿到每句 id；highlight 高亮某个句子 id 并给类别和一句话理由；list_figures 列出图表；view_figure 识读某张图/表的视觉内容。" +
+      ((this.getPref("serperKey") || "").trim() ? "需要核对背景、术语或相关工作时，可用 web_search 联网搜索、web_fetch 抓取网页。\n" : "需要抓取网页正文时可用 web_fetch。\n") +
       "流程：先 list_sections；再对值得读的章节逐个 read_section；遇到被正文引用的重要图/表，用 list_figures + view_figure 看懂再判断；对真正关键的句子调用 highlight（每节通常 2-6 句，务必精选，避免过度标注）；覆盖重要章节后调用 finish 结束。\n" +
       (deep ? "【深读模式】务必遍历所有章节（对每个 section 都 read_section，不要跳过），并对每张图/表 view_figure；在此基础上更充分地标注。\n" : "") +
       "类别只能是 contribution / method / result / limitation / keyterm。highlight 的 id 必须来自 read_section 返回的 id。";
