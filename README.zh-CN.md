@@ -14,6 +14,8 @@
 
 <a href="README.md">English</a> · <b>中文</b>
 
+<p>用 Obsidian？→ <a href="https://github.com/dongZheX/obsidian-ai-reader"><b>AI Reader for Obsidian</b></a></p>
+
 </div>
 
 ---
