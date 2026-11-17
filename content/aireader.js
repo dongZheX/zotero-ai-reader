@@ -1791,6 +1791,26 @@ AIReader = {
     if (fmt === "responses") return T.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
     return T.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
   },
+  // Anthropic reads the longest cached *prefix*. A breakpoint on the system
+  // block alone caches only the paper/system — the growing conversation is
+  // re-read uncached every turn. Add a second, rolling breakpoint on the last
+  // message so each turn caches the conversation so far; the next turn hits it
+  // and only the new delta is written (incremental multi-turn caching).
+  // Clone so we never persist cache_control back into the live history.
+  _anthropicCacheMsgs(msgs) {
+    if (!msgs.length) return msgs;
+    const out = msgs.slice();
+    const last = out[out.length - 1];
+    const CC = { type: "ephemeral" };
+    if (Array.isArray(last.content) && last.content.length) {
+      const blocks = last.content.map((b) => ({ ...b }));
+      blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: CC };
+      out[out.length - 1] = { ...last, content: blocks };
+    } else if (typeof last.content === "string") {
+      out[out.length - 1] = { ...last, content: [{ type: "text", text: last.content, cache_control: CC }] };
+    }
+    return out;
+  },
   _toolBody(fmt, messages, tools, stream) {
     const model = this.getPref("model");
     const t = parseFloat(this.getPref("temperature")); const temp = isNaN(t) ? 0.3 : t;
@@ -1798,7 +1818,7 @@ AIReader = {
     const hasTools = Array.isArray(tools) && tools.length > 0;
     if (fmt === "anthropic") {
       const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
-      const msgs = messages.filter((m) => m.role !== "system");
+      const msgs = this._anthropicCacheMsgs(messages.filter((m) => m.role !== "system"));
       const body = { model, messages: msgs, max_tokens: maxTok || 32000, temperature: temp, stream: !!stream };
       if (hasTools) body.tools = tools;
       // Cache the large, stable system prompt (paper context) so multi-turn
@@ -2595,7 +2615,7 @@ AIReader = {
     }
     if (fmt === "anthropic") {
       const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
-      const msgs = messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
+      const msgs = this._anthropicCacheMsgs(messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content })));
       // Anthropic requires max_tokens; when uncapped, request a large ceiling so answers aren't truncated.
       const body = { model, messages: msgs, max_tokens: maxTok || 32000, temperature: temp, stream: !!stream };
       if (system) body.system = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];

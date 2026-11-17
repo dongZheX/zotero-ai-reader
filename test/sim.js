@@ -681,6 +681,16 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  { const o=JSON.parse(A._toolBody('anthropic',[{role:'system',content:'S'},{role:'user',content:'u'}],[],false));
    assert(o.max_tokens===32000,'anthropic tool-path max_tokens is 32000 (not 8000)');
    assert(Array.isArray(o.system)&&o.system[0].cache_control&&o.system[0].cache_control.type==='ephemeral','anthropic system carries ephemeral cache_control');
+   // rolling cache breakpoint: the last message carries cache_control so multi-turn caches the conversation prefix
+   const lastMsg=o.messages[o.messages.length-1];
+   assert(Array.isArray(lastMsg.content)&&lastMsg.content[lastMsg.content.length-1].cache_control,'anthropic last (string) message wrapped with cache_control block');
+ }
+ // _anthropicCacheMsgs: marks the last block, keeps earlier turns clean, never mutates input
+ { const live=[{role:'user',content:'q1'},{role:'assistant',content:[{type:'text',text:'a'},{type:'tool_use',id:'t',name:'n',input:{}}]}];
+   const out=A._anthropicCacheMsgs(live);
+   assert(!live[1].content[1].cache_control,'original live history not mutated');
+   assert(out[out.length-1].content[1].cache_control&&out[out.length-1].content[1].cache_control.type==='ephemeral','cache_control added to last block of last message');
+   assert(out[0].content==='q1','earlier turns left untouched (no breakpoint)');
  }
  // cache-hit tokens surfaced from usage
  { const m={}; A._captureUsage(m,{usage:{input_tokens:100,output_tokens:20,cache_read_input_tokens:900}}); assert(m.cacheRead===900,'cache_read surfaced'); }
