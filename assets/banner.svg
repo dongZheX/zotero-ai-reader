@@ -50,12 +50,14 @@
     <text x="0" y="0" font-size="68" font-weight="800" fill="#ffffff" letter-spacing="-1">AI Reader</text>
     <text x="4" y="46" font-size="25" font-weight="500" fill="#9db2d6">AI-assisted paper reading, right inside Zotero</text>
     <g transform="translate(4,78)" font-size="16" font-weight="600">
-      <rect x="0" y="-18" width="188" height="30" rx="15" fill="#1b2540" stroke="#2f3d61"/>
-      <text x="94" y="2" fill="#7fe0a3" text-anchor="middle">⟲ 反向召回到原文</text>
-      <rect x="204" y="-18" width="150" height="30" rx="15" fill="#1b2540" stroke="#2f3d61"/>
-      <text x="279" y="2" fill="#ffd36b" text-anchor="middle">✎ AI 写标注</text>
-      <rect x="370" y="-18" width="176" height="30" rx="15" fill="#1b2540" stroke="#2f3d61"/>
-      <text x="458" y="2" fill="#8ab6ff" text-anchor="middle">∑ Markdown + 公式</text>
+      <rect x="0" y="-18" width="132" height="30" rx="15" fill="#1b2540" stroke="#2f3d61"/>
+      <text x="66" y="2" fill="#7fe0a3" text-anchor="middle">⟲ 点击溯源</text>
+      <rect x="146" y="-18" width="120" height="30" rx="15" fill="#1b2540" stroke="#2f3d61"/>
+      <text x="206" y="2" fill="#ffd36b" text-anchor="middle">✎ AI 标注</text>
+      <rect x="280" y="-18" width="148" height="30" rx="15" fill="#1b2540" stroke="#2f3d61"/>
+      <text x="354" y="2" fill="#8ab6ff" text-anchor="middle">◇ 对话内画图</text>
+      <rect x="442" y="-18" width="186" height="30" rx="15" fill="#1b2540" stroke="#2f3d61"/>
+      <text x="535" y="2" fill="#c9a8ff" text-anchor="middle">⚡ 连续读论文 agent</text>
     </g>
   </g>
 </svg>

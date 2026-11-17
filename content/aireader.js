@@ -10,6 +10,8 @@ AIReader = {
   _chatStore: new Map(),   // attachment.key -> [{role, content}]
   _blockStore: new Map(),  // attachment.key -> blocks[]
   _histSummary: new Map(), // attachment.key -> rolling summary of compacted older turns
+  _readStore: new Map(),   // attachment.key -> Map(sectionIndex -> {title,text})  — read sections
+  _figStore: new Map(),    // attachment.key -> Map(figId -> {page,kind,desc})      — viewed figures
   _popupCache: null,       // {text, raw, showActions} — survives reader popup re-render on scroll
   _deepRead: false,        // deep-read mode: traverse the whole paper + use vision aggressively
 
@@ -288,7 +290,8 @@ AIReader = {
     top.appendChild(noteBtn);
     top.appendChild(this._el(doc, "div", "aireader-foot-spacer"));
     top.appendChild(gear);
-    body.appendChild(top);
+    // (the button row is appended just above the composer below, not at the top,
+    //  so the input area is the visual focus)
 
     const status = this._el(doc, "div", "aireader-status");
     body.appendChild(status);
@@ -330,6 +333,7 @@ AIReader = {
     footer.appendChild(clear);
     body.appendChild(footer);
 
+    body.appendChild(top); // button row sits right above the input area
     body.appendChild(composer);
 
     const preview = this._el(doc, "div", "aireader-preview");
@@ -457,6 +461,7 @@ AIReader = {
     }
     state.skillMenu = menu;
     body.appendChild(menu);
+    this._positionMenu(state, menu, state.skillBtn);
     const onDoc = (ev) => { if (state.skillMenu && !state.skillMenu.contains(ev.target) && ev.target !== state.skillBtn) this.closeSkillMenu(state); };
     state._onSkillDoc = onDoc;
     setTimeout(() => doc.addEventListener("click", onDoc), 0);
@@ -471,6 +476,17 @@ AIReader = {
     state.modelPill.textContent = (this.getPref("model") || "选择模型") + "  ·  " + this._fmt() + "  ▾";
   },
 
+  // Anchor a dropdown to its button, flipping up or down based on available space
+  // (the button row / model bar now sit near the bottom, above the input).
+  _positionMenu(state, menu, btn) {
+    try {
+      const rr = state.body.getBoundingClientRect(), br = btn.getBoundingClientRect();
+      menu.style.left = "4px"; menu.style.right = "4px";
+      const below = rr.bottom - br.bottom, above = br.top - rr.top;
+      if (below >= above) { menu.style.top = (br.bottom - rr.top + 4) + "px"; menu.style.bottom = "auto"; }
+      else { menu.style.bottom = (rr.bottom - br.top + 4) + "px"; menu.style.top = "auto"; }
+    } catch (e) {}
+  },
   toggleModelMenu(body) {
     const state = this._bodyState.get(body);
     if (!state) return;
@@ -496,6 +512,7 @@ AIReader = {
     menu.appendChild(listWrap);
     state.modelMenu = menu;
     body.appendChild(menu);
+    this._positionMenu(state, menu, state.modelPill);
     this.populateModels(state, listWrap);
     const onDoc = (ev) => { if (state.modelMenu && !state.modelMenu.contains(ev.target) && ev.target !== state.modelPill) this.closeModelMenu(state); };
     state._onDoc = onDoc;
@@ -588,8 +605,11 @@ AIReader = {
   onClear(body) {
     const state = this._bodyState.get(body);
     if (!state || !state.attachment) return;
-    this._chatStore.set(state.attachment.key, []);
+    const key = state.attachment.key;
+    this._chatStore.set(key, []);
     this.saveChat(state.attachment, []).catch(() => {});
+    this._histSummary.delete(key); this._readStore.delete(key); this._figStore.delete(key); // reset continuous context too
+    state.live = null;
     state.chatMsgs.textContent = "";
     this.setStatus(state, "已清空对话。", "muted");
   },
@@ -969,6 +989,89 @@ AIReader = {
     } catch (e) { this.log("compact error: " + e); hist.unshift.apply(hist, older); }
   },
 
+  // ---- continuous agentic conversation (live message history + compaction) ----
+  // A "real user" turn marks a round boundary. NB: Anthropic tool_result turns are
+  // also role:"user" but their content is an array — those are NOT boundaries.
+  _isUserTurn(m) { return m && m.role === "user" && typeof m.content === "string"; },
+  _liveChars(messages) {
+    let n = 0;
+    for (const m of messages) { try { n += (typeof m.content === "string" ? m.content : JSON.stringify(m.content || m)).length; } catch (e) {} }
+    return n;
+  },
+  // Rebuild the live history from the persisted text hist when it's missing, or
+  // when the attachment / API format changed (tool-turn structure is format- and
+  // session-specific, so we don't carry it across those).
+  _ensureLive(state) {
+    const key = state.attachment && state.attachment.key;
+    const fmt = this._fmt();
+    if (state.live && state.live.key === key && state.live.fmt === fmt) return;
+    const hist = this._chatStore.get(key) || [];
+    const messages = hist.filter((m) => m && m.role && typeof m.content === "string").map((m) => ({ role: m.role, content: m.content }));
+    state.live = { key, fmt, messages };
+  },
+  // Regenerate: drop everything after (and including the assistant for) the last
+  // real user turn, keeping that user turn so it can be answered again.
+  _rollbackLiveToLastUser(state) {
+    if (!state.live) return;
+    const msgs = state.live.messages;
+    let lastU = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) if (this._isUserTurn(msgs[i])) { lastU = i; break; }
+    if (lastU >= 0) msgs.splice(lastU + 1); // keep the user turn, drop its answer + tool turns
+  },
+  // Compact the live history like an agent harness: summarise the oldest whole
+  // rounds (prose + what was read/seen) into one note, keep the recent rounds
+  // intact. Rounds are split on real user turns so tool_use/tool_result pairs
+  // are never severed.
+  async _compactLive(state, meta) {
+    if (!state.live) return;
+    const msgs = state.live.messages;
+    const TRIGGER = 120000, KEEPCHARS = 60000;
+    if (this._liveChars(msgs) < TRIGGER) return;
+    // user-turn boundaries
+    const bounds = [];
+    for (let i = 0; i < msgs.length; i++) if (this._isUserTurn(msgs[i])) bounds.push(i);
+    if (bounds.length < 2) return; // need at least one older + one recent round
+    // find the earliest boundary such that the kept tail is under KEEPCHARS
+    let cut = bounds[bounds.length - 1];
+    for (let bi = bounds.length - 1; bi >= 1; bi--) {
+      if (this._liveChars(msgs.slice(bounds[bi])) > KEEPCHARS) { cut = bounds[bi + 1] != null ? bounds[bi + 1] : cut; break; }
+      cut = bounds[bi];
+    }
+    const older = msgs.slice(0, cut);
+    if (!older.length) return;
+    if (meta) this.setStatus(state, "整理上下文…", "busy");
+    try {
+      const sum = await this.callLLM([
+        { role: "system", content: "把下面这段『阅读对话 + 工具读取』压缩成要点笔记，务必保留：已读过哪些章节及其关键内容与数据、已识读的图表结论、用户问过/关注的问题、已得出的结论。简洁中文、分条，便于后续继续引用，避免重复读取。" },
+        { role: "user", content: this._turnsToText(older) },
+      ]);
+      const note = { role: "user", content: "【早期阅读与对话摘要（供连续参考，无需重复读取已覆盖的章节/图表）】\n" + (sum || "").trim() };
+      state.live.messages = [note].concat(msgs.slice(cut));
+    } catch (e) { this.log("live compact error: " + e); } // leave as-is on failure
+  },
+  // Flatten a slice of the live history (incl. tool turns, any API format) into
+  // readable text for summarisation.
+  _turnsToText(messages) {
+    const out = [];
+    for (const m of messages) {
+      if (this._isUserTurn(m)) { out.push("用户：" + m.content); continue; }
+      if (m.role === "assistant" && typeof m.content === "string") { if (m.content.trim()) out.push("助手：" + m.content); continue; }
+      if (m.role === "tool") { out.push("（工具结果：" + String(m.content || "").slice(0, 1200) + "）"); continue; } // openai chat
+      if (m.type === "function_call") { out.push("（调用 " + m.name + "）"); continue; } // responses
+      if (m.type === "function_call_output") { out.push("（工具结果：" + String(m.output || "").slice(0, 1200) + "）"); continue; }
+      if (Array.isArray(m.content)) { // anthropic blocks
+        for (const b of m.content) {
+          if (b.type === "text") out.push((m.role === "assistant" ? "助手：" : "") + (b.text || ""));
+          else if (b.type === "tool_use") out.push("（调用 " + b.name + "）");
+          else if (b.type === "tool_result") out.push("（工具结果：" + String(typeof b.content === "string" ? b.content : JSON.stringify(b.content)).slice(0, 1200) + "）");
+        }
+        continue;
+      }
+      if (m.role === "assistant" && typeof m.content === "string") out.push("助手：" + m.content);
+    }
+    return out.join("\n");
+  },
+
   _regen(state, msg, question) {
     try { msg.remove(); } catch (e) {}
     const hist = this._chatStore.get(state.attachment.key) || [];
@@ -1028,10 +1131,15 @@ AIReader = {
           ? "【深读模式】回答前请主动用 list_sections + read_section 读取所有相关章节，并对相关图/表 view_figure，确保基于充分证据作答。"
           : "当注入的正文不足以准确回答、或问题涉及具体数据/图表时，请主动调用 read_section / view_figure 查阅后再答；普通问题可直接作答。");
       const sys = this.systemPrompt(ctx) + toolNote + this._skillDirective() + (sumNote ? "\n\n【早期对话要点】\n" + sumNote : "");
-      // On regen (skipUser) the question is already the last history entry, so
-      // don't append it again (that duplicated it in the prompt).
-      const messages = [{ role: "system", content: sys }, ...hist.slice(-12)];
-      if (!opts.skipUser) messages.push({ role: "user", content: text });
+      // Continuous agentic context: one live message history (incl. tool turns)
+      // persists across questions; compact it when it grows too large. The read
+      // tool results already live in `convo`, so we no longer inject _priorContext.
+      this._ensureLive(state);
+      if (opts.skipUser) this._rollbackLiveToLastUser(state); // regen: redo the last question
+      await this._compactLive(state, meta);
+      const convo = state.live.messages;
+      if (!opts.skipUser) convo.push({ role: "user", content: text });
+      const withSys = () => [{ role: "system", content: sys }, ...convo];
 
       // Stream the answer; if the model issues tool calls mid-stream, execute
       // them (shown as collapsible tool blocks) and continue — so tool use is a
@@ -1043,7 +1151,7 @@ AIReader = {
       const ensureToolLog = () => { if (!toolLogAdded) { bubble.appendChild(toolLog); toolLogAdded = true; } };
       let answerEl = this._el(state.doc, "div", "aireader-answer"); bubble.appendChild(answerEl);
       let full = "";
-      const MAX_ROUNDS = deep ? 16 : 8;
+      const MAX_ROUNDS = deep ? 20 : 10;
       for (let round = 0; round < MAX_ROUNDS && !state.cancel; round++) {
         let acc = "", lastR = 0, lastRendered = null;
         const turnEl = answerEl;
@@ -1054,7 +1162,7 @@ AIReader = {
           if (cut == null) { this._clearDrawing(turnEl); if (force || text !== lastRendered) { try { this.renderRich(state, turnEl, text); } catch (e) { turnEl.textContent = text; } lastRendered = text; } }
           else { if (force || cut !== lastRendered) { try { this.renderRich(state, turnEl, cut); } catch (e) { turnEl.textContent = cut; } lastRendered = cut; } this._showDrawing(state, turnEl); }
         };
-        const res = await this._streamAnswer(messages, tools, (d) => {
+        const res = await this._streamAnswer(withSys(), tools, (d) => {
           acc += d;
           const el = state.chatMsgs;
           const stick = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
@@ -1065,17 +1173,36 @@ AIReader = {
         }, () => state.cancel, meta);
         paint(res.text || "", true); // still hide any in-progress diagram source (final SVG is drawn by enhanceMessage below)
         if (res.calls && res.calls.length && !state.cancel) {
-          this._pushAssistantToolTurn(fmt0, messages, { text: res.text, calls: res.calls });
+          this._pushAssistantToolTurn(fmt0, convo, { text: res.text, calls: res.calls, reasoning: res.reasoning });
           ensureToolLog();
           this.setStatus(state, "调用工具中…", "busy");
           const results = [];
-          for (const call of res.calls) { const r = await this._execTool(state, tc, call); this._appendToolGrouped(state, toolLog, grp, r.render); results.push({ id: call.id, name: call.name, output: r.output }); }
-          this._pushToolResults(fmt0, messages, results);
+          const slots = await this._runToolCalls(state, tc, res.calls);
+          res.calls.forEach((call, i) => { const r = slots[i]; this._appendToolGrouped(state, toolLog, grp, r.render); results.push({ id: call.id, name: call.name, output: r.output }); });
+          this._pushToolResults(fmt0, convo, results);
           answerEl = this._el(state.doc, "div", "aireader-answer"); bubble.appendChild(answerEl);
           try { state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight; } catch (e) {}
           continue;
         }
         full = res.text || ""; break;
+      }
+
+      // Ran out of tool rounds without a final answer (model kept calling tools) —
+      // ask once more WITHOUT tools so it must write the answer, instead of
+      // leaving an empty bubble ("卡住").
+      if (!full && !state.cancel) {
+        convo.push({ role: "user", content: "请基于以上读取到的内容，给出完整、充分的回答。" });
+        const fin = answerEl; let acc2 = "", lastR2 = 0, lastRend2 = null;
+        const paint2 = (t, force) => {
+          const cut = this._artifactCut(t);
+          if (cut == null) { this._clearDrawing(fin); if (force || t !== lastRend2) { try { this.renderRich(state, fin, t); } catch (e) { fin.textContent = t; } lastRend2 = t; } }
+          else { if (force || cut !== lastRend2) { try { this.renderRich(state, fin, cut); } catch (e) { fin.textContent = cut; } lastRend2 = cut; } this._showDrawing(state, fin); }
+        };
+        try {
+          const res2 = await this._streamAnswer(withSys(), null, (d) => { acc2 += d; const now = Date.now(); if (now - lastR2 > 140) { lastR2 = now; paint2(acc2); } this.setStatus(state, "整理回答… " + acc2.length + " 字", "busy"); if (state.chatMsgs) state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight; }, () => state.cancel, meta);
+          paint2(res2.text || acc2, true);
+          full = res2.text || acc2 || "";
+        } catch (e) { this.log("final wrap-up failed: " + e); }
       }
 
       bubble.classList.remove("aireader-streaming");
@@ -1084,6 +1211,7 @@ AIReader = {
       this.addMetaLine(state, msg, meta, full);
       if (tc.run.keys.length) { state._lastRun = tc.run; this._renderAgentSummary(state, bubble, tc.tally, tc.run.keys.length, false); }
       this.setStatus(state, "", "");
+      convo.push({ role: "assistant", content: full }); // final text turn into the live history
       if (!opts.skipUser) hist.push({ role: "user", content: text });
       hist.push({ role: "assistant", content: full });
       this.saveChat(state.attachment, hist).catch(() => {});
@@ -1104,7 +1232,8 @@ AIReader = {
       const inTok = meta.inTok != null ? ("⬆ " + meta.inTok + " ") : "";
       const approx = meta.outTok != null ? "" : "~";
       const ctxk = meta.ctxChars != null ? (" · 上下文 " + (meta.ctxChars >= 1000 ? (meta.ctxChars / 1000).toFixed(1) + "k" : meta.ctxChars) + " 字") : "";
-      const line = this._el(doc, "div", "aireader-meta", inTok + "⬇ " + approx + outTok + " tok" + ctxk);
+      const cache = meta.cacheRead ? (" · 缓存命中 " + (meta.cacheRead >= 1000 ? (meta.cacheRead / 1000).toFixed(1) + "k" : meta.cacheRead)) : "";
+      const line = this._el(doc, "div", "aireader-meta", inTok + "⬇ " + approx + outTok + " tok" + cache + ctxk);
       msg.appendChild(line);
     } catch (e) {}
   },
@@ -1666,19 +1795,25 @@ AIReader = {
     const model = this.getPref("model");
     const t = parseFloat(this.getPref("temperature")); const temp = isNaN(t) ? 0.3 : t;
     const mtRaw = parseInt(this.getPref("maxTokens"), 10); const maxTok = isNaN(mtRaw) || mtRaw <= 0 ? 0 : mtRaw;
+    const hasTools = Array.isArray(tools) && tools.length > 0;
     if (fmt === "anthropic") {
       const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
       const msgs = messages.filter((m) => m.role !== "system");
-      const body = { model, messages: msgs, max_tokens: maxTok || 8000, temperature: temp, tools, stream: !!stream };
-      if (system) body.system = system;
+      const body = { model, messages: msgs, max_tokens: maxTok || 32000, temperature: temp, stream: !!stream };
+      if (hasTools) body.tools = tools;
+      // Cache the large, stable system prompt (paper context) so multi-turn
+      // requests on the same paper hit the prompt cache instead of re-billing it.
+      if (system) body.system = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
       return JSON.stringify(body);
     }
     if (fmt === "responses") {
-      const body = { model, input: messages, temperature: temp, tools, tool_choice: "auto", stream: !!stream };
+      const body = { model, input: messages, temperature: temp, stream: !!stream };
+      if (hasTools) { body.tools = tools; body.tool_choice = "auto"; }
       if (maxTok) body.max_output_tokens = maxTok;
       return JSON.stringify(body);
     }
-    const body = { model, messages, temperature: temp, tools, tool_choice: "auto", stream: !!stream };
+    const body = { model, messages, temperature: temp, stream: !!stream };
+    if (hasTools) { body.tools = tools; body.tool_choice = "auto"; }
     if (maxTok) body.max_tokens = maxTok;
     if (stream) body.stream_options = { include_usage: true };
     return JSON.stringify(body);
@@ -1701,11 +1836,39 @@ AIReader = {
   _finalizeToolCalls(tc) {
     return Object.keys(tc).sort((a, b) => a - b).map((k) => ({ id: tc[k].id, name: tc[k].name, args: this._safeJSON(tc[k].args) })).filter((c) => c.name);
   },
+  // Accumulate the model's REASONING so it can be fed back verbatim on the next
+  // round — required for multi-turn tool use: Anthropic rejects a follow-up whose
+  // assistant turn drops the thinking block (it must keep its signature), and
+  // OpenAI /responses needs the reasoning item returned with its id. (litellm does
+  // the same "preserve & replay" for both.) Chat Completions has no such token.
+  _streamReasoningDelta(fmt, j, racc) {
+    if (fmt === "anthropic") {
+      if (j.type === "content_block_start" && j.content_block) {
+        if (j.content_block.type === "thinking") racc[j.index] = { type: "thinking", thinking: j.content_block.thinking || "", signature: j.content_block.signature || "" };
+        else if (j.content_block.type === "redacted_thinking") racc[j.index] = { type: "redacted_thinking", data: j.content_block.data || "" };
+      } else if (j.type === "content_block_delta" && j.delta && racc[j.index]) {
+        if (j.delta.type === "thinking_delta") racc[j.index].thinking += j.delta.thinking || "";
+        else if (j.delta.type === "signature_delta") racc[j.index].signature = (racc[j.index].signature || "") + (j.delta.signature || "");
+      }
+      return;
+    }
+    if (fmt === "responses") {
+      // keep the whole reasoning item (id / summary / encrypted_content) verbatim
+      if ((j.type === "response.output_item.added" || j.type === "response.output_item.done") && j.item && j.item.type === "reasoning") racc[j.output_index] = j.item;
+      return;
+    }
+  },
+  _finalizeReasoning(racc) {
+    const keys = Object.keys(racc);
+    return keys.length ? keys.sort((a, b) => a - b).map((k) => racc[k]).filter(Boolean) : [];
+  },
   // Streamed turn that returns both the streamed text and any tool calls.
   async _streamAnswer(messages, tools, onDelta, shouldStop, meta) {
     meta = meta || {};
     const fmt = this._fmt();
-    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._toolBody(fmt, messages, tools, true) });
+    // Long streamed answers can take minutes; the default 60s abort would cut
+    // the stream mid-sentence, so give streaming a generous ceiling and no retry.
+    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._toolBody(fmt, messages, tools, true) }, { timeoutMs: 600000, retries: 0 });
     if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
     if (!resp.body || typeof resp.body.getReader !== "function") {
       const raw = await resp.text(); const data = this._parseOrThrow(raw);
@@ -1713,10 +1876,10 @@ AIReader = {
       this._captureUsage(meta, data);
       const parsed = this._parseToolCalls(fmt, data);
       if (parsed.text) onDelta(parsed.text);
-      return { text: parsed.text, calls: parsed.calls };
+      return { text: parsed.text, calls: parsed.calls, reasoning: parsed.reasoning || [] };
     }
     const reader = resp.body.getReader(); const dec = new TextDecoder();
-    let buf = "", text = ""; const tc = {};
+    let buf = "", text = ""; const tc = {}; const racc = {};
     while (true) {
       if (shouldStop && shouldStop()) { try { await reader.cancel(); } catch (e) {} break; }
       const { done, value } = await reader.read(); if (done) break;
@@ -1731,41 +1894,52 @@ AIReader = {
         this._captureUsage(meta, j);
         const d = this._streamDelta(fmt, j); if (d) { text += d; onDelta(d); }
         this._streamToolDelta(fmt, j, tc);
+        this._streamReasoningDelta(fmt, j, racc);
       }
     }
-    return { text, calls: this._finalizeToolCalls(tc) };
+    return { text, calls: this._finalizeToolCalls(tc), reasoning: this._finalizeReasoning(racc) };
   },
   _safeJSON(s) { if (s && typeof s === "object") return s; try { return JSON.parse(s || "{}"); } catch (e) { return {}; } },
   _parseToolCalls(fmt, data) {
     if (fmt === "anthropic") {
       const content = Array.isArray(data.content) ? data.content : [];
-      let text = ""; const calls = [];
-      for (const c of content) { if (c.type === "text") text += c.text || ""; else if (c.type === "tool_use") calls.push({ id: c.id, name: c.name, args: c.input || {} }); }
-      return { text, calls, raw: content };
+      let text = ""; const calls = [], reasoning = [];
+      for (const c of content) {
+        if (c.type === "text") text += c.text || "";
+        else if (c.type === "tool_use") calls.push({ id: c.id, name: c.name, args: c.input || {} });
+        else if (c.type === "thinking" || c.type === "redacted_thinking") reasoning.push(c);
+      }
+      return { text, calls, reasoning, raw: content };
     }
     if (fmt === "responses") {
       const out = Array.isArray(data.output) ? data.output : [];
-      let text = ""; const calls = [];
-      for (const o of out) { if (o.type === "function_call") calls.push({ id: o.call_id || o.id, name: o.name, args: this._safeJSON(o.arguments) }); else if (o.type === "message" && Array.isArray(o.content)) text += o.content.map((x) => x.text || "").join(""); }
+      let text = ""; const calls = [], reasoning = [];
+      for (const o of out) {
+        if (o.type === "function_call") calls.push({ id: o.call_id || o.id, name: o.name, args: this._safeJSON(o.arguments) });
+        else if (o.type === "reasoning") reasoning.push(o);
+        else if (o.type === "message" && Array.isArray(o.content)) text += o.content.map((x) => x.text || "").join("");
+      }
       if (typeof data.output_text === "string" && data.output_text) text = data.output_text;
-      return { text, calls, raw: out };
+      return { text, calls, reasoning, raw: out };
     }
     const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
     const calls = (msg.tool_calls || []).map((tc) => ({ id: tc.id, name: tc.function && tc.function.name, args: this._safeJSON(tc.function && tc.function.arguments) }));
-    return { text: msg.content || "", calls, raw: msg };
+    return { text: msg.content || "", calls, reasoning: [], raw: msg };
   },
   // Build the assistant turn in each format's native shape from {text, calls}
   // (works whether the turn came from a streamed or non-streamed response).
   _pushAssistantToolTurn(fmt, messages, parsed) {
-    const calls = parsed.calls || [], text = parsed.text || "";
+    const calls = parsed.calls || [], text = parsed.text || "", reasoning = parsed.reasoning || [];
     if (fmt === "anthropic") {
       const content = [];
+      for (const r of reasoning) content.push(r); // thinking/redacted_thinking FIRST, verbatim (keeps signature)
       if (text) content.push({ type: "text", text });
       for (const c of calls) content.push({ type: "tool_use", id: c.id, name: c.name, input: c.args || {} });
       messages.push({ role: "assistant", content });
       return;
     }
     if (fmt === "responses") {
+      for (const r of reasoning) messages.push(r); // reasoning item returned verbatim, before the function_call
       if (text) messages.push({ role: "assistant", content: text });
       for (const c of calls) messages.push({ type: "function_call", call_id: c.id, name: c.name, arguments: JSON.stringify(c.args || {}) });
       return;
@@ -1847,6 +2021,46 @@ AIReader = {
 
   // Execute one tool call against the paper. c = {sections, byId, run, tally, reads}.
   // Returns { output (string for the model), render (tool-block spec), finish? }.
+  // Session-scoped cache of what the model has already read (sections) and seen
+  // (figures) for the current paper, so later turns reuse it instead of calling
+  // the same read_section / view_figure again — a continuous reading context.
+  // Global (per attachment key) caches of what has been read/viewed, so the
+  // selection-popup Explain — which has no panel state — can also see them, and
+  // so the "通读并标注" agent (which has no live conversation) can reuse them.
+  _readFor(key) { if (!this._readStore.has(key)) this._readStore.set(key, new Map()); return this._readStore.get(key); },
+  _figFor(key) { if (!this._figStore.has(key)) this._figStore.set(key, new Map()); return this._figStore.get(key); },
+  _priorContextForKey(key) {
+    if (!key) return "";
+    const parts = [];
+    for (const [, s] of (this._readStore.get(key) || new Map())) parts.push("## " + s.title + "\n" + s.text);
+    for (const [id, f] of (this._figStore.get(key) || new Map())) parts.push("## 图/表 B" + id + "（p" + f.page + "）\n" + f.desc);
+    if (!parts.length) return "";
+    let body = parts.join("\n\n");
+    const CAP = 40000;
+    if (body.length > CAP) body = "…（较早内容略）…\n" + body.slice(body.length - CAP); // keep most recent
+    return "\n\n【本会话已读资料（已为你读取，可直接引用；不要再 read_section / view_figure 已在此列出的章节/图表）】\n" + body;
+  },
+  // Run one round's tool calls, returning results aligned with `calls`.
+  // Read-only calls (reading sections, viewing figures, web) run concurrently up
+  // to maxParallelTools (default 3; set 1 to force serial if your API rejects
+  // parallel requests); side-effecting calls (highlight/finish) stay serial and
+  // in order. Per-call failures become an error result, never crash the round.
+  async _runToolCalls(state, c, calls) {
+    const RO = new Set(["list_sections", "read_section", "list_figures", "view_figure", "web_search", "web_fetch"]);
+    const limit = Math.max(1, parseInt(this.getPref("maxParallelTools"), 10) || 3);
+    const slots = new Array(calls.length);
+    const run1 = async (i) => {
+      try { slots[i] = await this._execTool(state, c, calls[i]); }
+      catch (e) { slots[i] = { output: JSON.stringify({ error: String((e && e.message) || e) }), render: { label: calls[i].name, outcome: "✕ 失败" } }; }
+    };
+    const ro = [], wr = [];
+    calls.forEach((call, i) => (RO.has(call.name) ? ro : wr).push(i));
+    let p = 0;
+    const worker = async () => { while (p < ro.length) { await run1(ro[p++]); } };
+    await Promise.all(Array.from({ length: Math.min(limit, ro.length) }, () => worker()));
+    for (const i of wr) await run1(i); // side effects serial + in order
+    return slots;
+  },
   async _execTool(state, c, call) {
     const name = call.name, args = call.args || {};
     if (name === "list_sections") {
@@ -1854,14 +2068,18 @@ AIReader = {
         render: { label: "列出章节", outcome: "→ " + c.sections.length + " 节", bodyText: c.sections.map((s) => "[" + s.index + "] " + s.title + "  (p" + s.page + " · " + s.blockIds.length + " 句)").join("\n") } };
     }
     if (name === "read_section") {
+      if (c.maxReads && (c.reads || 0) >= c.maxReads) return { output: JSON.stringify({ error: "read limit reached" }), render: { label: "读取章节", brief: "index " + args.index, outcome: "✕ 已达上限" } };
       c.reads = (c.reads || 0) + 1;
       const s = c.sections[args.index];
       if (!s) return { output: JSON.stringify({ error: "no such section " + args.index }), render: { label: "读取章节", brief: "index " + args.index, outcome: "✕ 无此节" } };
       const lines = []; let total = 0;
       for (const id of s.blockIds) { const b = c.byId.get(id); if (!b) continue; lines.push({ id: b.id, page: b.pageLabel, text: b.text }); total += (b.text || "").length; if (total > 9000) break; }
-      return { output: JSON.stringify(lines), render: { label: "读取章节", brief: s.title, outcome: "→ " + lines.length + " 句", bodyText: lines.map((l) => "[B" + l.id + " p" + l.page + "] " + l.text).join("\n") } };
+      const btext = lines.map((l) => "[B" + l.id + " p" + l.page + "] " + l.text).join("\n");
+      { const k = state.attachment && state.attachment.key; if (k) this._readFor(k).set(args.index, { title: s.title, text: btext }); } // keep for later turns / popup
+      return { output: JSON.stringify(lines), render: { label: "读取章节", brief: s.title, outcome: "→ " + lines.length + " 句", bodyText: btext } };
     }
     if (name === "highlight") {
+      if (c.maxAnn && c.run && c.run.keys.length >= c.maxAnn) return { output: JSON.stringify({ error: "annotation limit reached" }), render: { label: "高亮", outcome: "✕ 已达上限" } };
       const b = c.byId.get(args.id);
       if (!b || !b.position) return { output: JSON.stringify({ error: "no such sentence id " + args.id }), render: { label: "高亮", brief: "id " + args.id, outcome: "✕ 无此句" } };
       const cat = args.category || "keyterm";
@@ -1884,6 +2102,7 @@ AIReader = {
         const lang = this.getPref("language") || "中文";
         const vm = this.buildVisionMessages(this._fmt(), lang, "请详细描述这张" + this.figKind(b.type) + "（第" + b.pageLabel + "页）展示的内容、坐标轴/变量、关键趋势与结论。", dataURI);
         const desc = (await this.callLLM(vm)).trim();
+        { const k = state.attachment && state.attachment.key; if (k) this._figFor(k).set(args.id, { page: b.pageLabel, kind: this.figKind(b.type), desc }); } // keep for later turns / popup
         return { output: JSON.stringify({ description: desc }), render: { label: "看图", brief: this.figKind(b.type) + " p" + b.pageLabel, outcome: "→ 已识读", bodyText: desc, jumpId: b.id } };
       } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label: "看图", brief: "p" + b.pageLabel, outcome: "✕ 失败" } }; }
     }
@@ -1984,7 +2203,7 @@ AIReader = {
     const run = { keys: [], applied: [], at: Date.now() };
     const tally = {};
     const grp = {}; // groups consecutive same-type tool blocks into "× N"
-    const c = { sections, byId, run, tally, reads: 0 };
+    const c = { sections, byId, run, tally, reads: 0, maxReads: MAX_READS, maxAnn: MAX_ANN };
     let steps = 0;
     const setHead = () => { headline.textContent = "🔧 阅读并标注中… 第 " + steps + " 步 · 已标注 " + run.keys.length + " 处"; };
 
@@ -1994,7 +2213,7 @@ AIReader = {
       "流程：先 list_sections；再对值得读的章节逐个 read_section；遇到被正文引用的重要图/表，用 list_figures + view_figure 看懂再判断；对真正关键的句子调用 highlight（每节通常 2-6 句，务必精选，避免过度标注）；覆盖重要章节后调用 finish 结束。\n" +
       (deep ? "【深读模式】务必遍历所有章节（对每个 section 都 read_section，不要跳过），并对每张图/表 view_figure；在此基础上更充分地标注。\n" : "") +
       "类别只能是 contribution / method / result / limitation / keyterm。highlight 的 id 必须来自 read_section 返回的 id。" +
-      (this.currentSkill().agentInject ? ("\n" + this.currentSkill().agentInject) : "");
+      (this.currentSkill().agentInject ? ("\n" + this.currentSkill().agentInject) : "") + this._priorContextForKey(state.attachment && state.attachment.key);
     const messages = [{ role: "system", content: sys }, { role: "user", content: (deep ? "请深读本论文（遍历所有章节 + 看所有图表）并标注关键句。先调用 list_sections。" : "请通读本论文并标注关键句。先调用 list_sections。") }];
     const tools = this._toolSchemas(fmt);
 
@@ -2020,15 +2239,15 @@ AIReader = {
         }
         this._pushAssistantToolTurn(fmt, messages, parsed);
         const results = [];
-        for (const call of parsed.calls) {
-          steps++; setHead();
-          if (call.name === "read_section" && c.reads >= MAX_READS) { results.push({ id: call.id, name: call.name, output: JSON.stringify({ error: "read limit reached" }) }); continue; }
-          const r = await this._execTool(state, c, call);
+        const slots = await this._runToolCalls(state, c, parsed.calls);
+        parsed.calls.forEach((call, i) => {
+          steps++;
+          const r = slots[i];
           this._appendToolGrouped(state, logWrap, grp, r.render);
           results.push({ id: call.id, name: call.name, output: r.output });
           if (r.finish) finished = true;
-          if (run.keys.length >= MAX_ANN) break;
-        }
+        });
+        setHead();
         this._pushToolResults(fmt, messages, results);
         setHead();
         try { state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight; } catch (e) {}
@@ -2379,7 +2598,7 @@ AIReader = {
       const msgs = messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
       // Anthropic requires max_tokens; when uncapped, request a large ceiling so answers aren't truncated.
       const body = { model, messages: msgs, max_tokens: maxTok || 32000, temperature: temp, stream: !!stream };
-      if (system) body.system = system;
+      if (system) body.system = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
       return JSON.stringify(body);
     }
     const body = { model, messages, temperature: temp, stream: !!stream };
@@ -2395,6 +2614,10 @@ AIReader = {
       if (u.input_tokens != null) meta.inTok = u.input_tokens;
       if (u.completion_tokens != null) meta.outTok = u.completion_tokens;
       if (u.output_tokens != null) meta.outTok = u.output_tokens;
+      // prompt-cache hits (Anthropic) / cached_tokens (OpenAI) so savings are visible
+      if (u.cache_read_input_tokens != null) meta.cacheRead = u.cache_read_input_tokens;
+      if (u.cache_creation_input_tokens != null) meta.cacheWrite = u.cache_creation_input_tokens;
+      if (u.prompt_tokens_details && u.prompt_tokens_details.cached_tokens != null) meta.cacheRead = u.prompt_tokens_details.cached_tokens;
     }
   },
   _extractContent(fmt, data) {
@@ -2451,7 +2674,7 @@ AIReader = {
     const fmt = this._fmt();
     // _fetchLLM retries only the connection (before any stream bytes), so a
     // mid-stream drop is never silently retried into a duplicate answer.
-    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, true) });
+    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, true) }, { timeoutMs: 600000, retries: 0 });
     if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
     if (!resp.body || typeof resp.body.getReader !== "function") {
       const raw = await resp.text();
@@ -2696,9 +2919,10 @@ AIReader = {
       "and do NOT add meta remarks like “更正”/“上一条”；只输出对选中原文的解释本身。\n\n" +
       this._styleGuide() +
       this._customPrompt() +
+      this._priorContextForKey(key) + // sections/figures the user already had the agent read, so the explanation can build on them
       (ctx ? ("## 论文相关段落\n" + ctx) : "");
     const messages = [{ role: "system", content: sys }];
-    for (const m of hist.slice(-8)) if (m && m.role && m.content) messages.push({ role: m.role, content: m.content });
+    for (const m of hist.slice(-8)) if (m && m.role && typeof m.content === "string") messages.push({ role: m.role, content: m.content });
     messages.push({ role: "user", content: "只解释下面这段原文（可参考上下文，但不要评论之前的对话）：\n“" + text + "”" });
     return messages;
   },

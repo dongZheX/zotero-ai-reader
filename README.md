@@ -4,7 +4,7 @@
 
 <h1>AI Reader for Zotero</h1>
 
-<p>Read papers with an AI assistant inside Zotero's item pane. Answers cite the source, and a click on any page badge jumps back to that spot in the PDF.</p>
+<p>Read papers with AI inside Zotero's item pane. Answers cite the source; click a page badge to jump back into the PDF.</p>
 
 <p>
   <img alt="version" src="https://img.shields.io/badge/version-0.8.2-3b7ddd?style=flat-square"/>
@@ -12,9 +12,7 @@
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
 
-<b>English</b> · <a href="README.zh-CN.md">中文</a>
-
-<p>Using Obsidian instead? → <a href="https://github.com/dongZheX/obsidian-ai-reader"><b>AI Reader for Obsidian</b></a></p>
+<b>English</b> · <a href="README.zh-CN.md">中文</a> · <a href="https://github.com/dongZheX/obsidian-ai-reader">Obsidian version</a>
 
 </div>
 
@@ -22,12 +20,12 @@
 
 ## What it is
 
-A Zotero plugin that puts a chat panel in the item-pane sidebar. Select a paper in your library and ask questions about it — no need to open the reader first. The paper's text is sent as context, so answers stay grounded in the actual document rather than the model's memory of it.
+A chat panel in Zotero's item-pane sidebar. Select a paper and ask about it; the paper's text goes to the model as context, so answers come from the document rather than the model's memory.
 
-Two things make it more than a chat box:
+Two things set it apart from a plain chat box:
 
-- **Answers point back to the page.** Each claim can carry a page badge (`p7`). Click it and the reader opens at that paragraph with a brief highlight. The mapping comes from Zotero's structured text, which carries page numbers and coordinates per text block.
-- **The model can write annotations.** It can suggest "highlight this" or "note that", which show up as buttons. Nothing touches your library until you click — then it creates a native yellow highlight tagged `AI`, which you can remove again from the panel.
+- **Answers cite the page.** A claim can carry a page badge (`p7`). Click it to open the reader at that paragraph with a brief highlight. The mapping comes from Zotero's structured text (page + coordinates per block).
+- **It writes annotations.** The model proposes "highlight this" / "note that" as buttons. Nothing changes your library until you click; then it writes a native highlight tagged `AI`, which you can remove from the panel.
 
 <div align="center">
 <img src="assets/ui-preview.svg" alt="AI Reader panel" width="560"/>
@@ -37,113 +35,94 @@ Two things make it more than a chat box:
 
 | | |
 |---|---|
-| **Grounded chat** | The whole paper is injected as context. Streaming Markdown output with `marked` + KaTeX for bold, lists, tables, code, and `$…$` / `$$…$$` math. Token and context usage shown per message. |
-| **Click-to-source** | `[B<id>]` citations render as page badges. Click to jump and highlight the matching block in the reader. |
-| **AI annotations** | The model proposes highlights/notes; you apply them with one click as native annotations. The `✕` removes every annotation it added at that spot. |
-| **Agentic read & annotate** | One click (**✨ 通读并标注**) sends the agent through the whole paper and applies colour-coded highlights + notes for the key points — contribution (yellow), method (green), result (blue), limitation (red), key term (purple). Fully automatic, de-duplicated and idempotent, with a live progress log and a one-click **undo this run**. |
-| **Reading skills** | Pick a reading mode from the panel header — 精读理解 (default), 同行评审 (peer review), 三遍速读 (Keshav), 领域综述, 可复现复刻, 批判红队, 导师讲解, 速览. Switching swaps the quick-action chips and injects that method into the prompt; figure/annotation abilities stay available across skills. |
-| **Figure & table vision** | Render a figure or table region to an image and send it to a multimodal model, instead of reading only the caption text. |
-| **Web search & fetch** | The model can call `web_search` (Google via Serper — set a Serper key in settings) and `web_fetch` (read a page as text) to check background, recent work, or terms beyond the paper. `web_fetch` works without a key; `web_search` only appears once a Serper key is set. |
-| **Inline diagrams (SVG)** | The model can draw a diagram with a fenced ` ```svg ` block; it renders inline (sanitized, scaled to fit the panel). The raw source is hidden while it streams — you see a "正在绘制…" animation, then the finished figure. Summary presets (总结全文 / 含图表 / 核心贡献 / 主要结论) ask for a diagram by default. |
-| **Selection popup** | Select text in the reader to quote it into the sidebar, explain it (streaming, with a copy button and a one-click "write to PDF annotation"), or translate it. Explanations see the paper context and the recent conversation. |
-| **Your notes as context** | Reads your existing highlights and notes so you can ask "summarize my highlights" or "answer based on my notes". |
-| **Persistence** | Conversation history is saved per attachment and restored next time. Save any conversation as a Zotero note. |
-| **Provider-agnostic** | OpenAI `chat/completions`, OpenAI `responses`, and Anthropic `messages`. Works with compatible gateways (DeepSeek, Moonshot, local Ollama / vLLM, …). |
+| **Grounded chat** | Whole paper as context. Streaming Markdown (`marked` + KaTeX, incl. `$…$` / `$$…$$` math); token and context usage shown per message. |
+| **Click-to-source** | `[B<id>]` citations render as page badges; click to jump and highlight the block in the reader. |
+| **AI annotations** | The model proposes highlights/notes; apply them in one click as native annotations. `✕` removes every annotation it added at that spot. |
+| **Read & annotate agent** | One click sends the agent through the whole paper, applying colour-coded highlights + notes by category (contribution / method / result / limitation / key term). De-duplicated, idempotent, with a progress log and one-click undo. |
+| **Reading skills** | Pick a mode in the header — 精读理解 (default), 同行评审, 三遍速读, 领域综述, 可复现复刻, 批判红队, 导师讲解, 速览. Each swaps the quick-action chips and injects its method. |
+| **Figure vision** | Render a figure or table region to an image for a multimodal model, instead of reading the caption text alone. |
+| **Web search & fetch** | `web_search` (Google via Serper, needs a key) and `web_fetch` (read a page as text) for background beyond the paper. |
+| **Inline diagrams** | The model draws with a ` ```svg ` block, rendered inline (sanitized, scaled to the panel). Source is hidden while it streams. |
+| **Continuous context** | The conversation is one running history — earlier reads stay visible, so the model doesn't re-read; it auto-compacts when long. |
+| **Selection popup** | Select text in the reader to quote it, explain it (streaming, with copy and "write to annotation"), or translate it. |
+| **Your notes as context** | Reads your existing highlights and notes, so you can ask "summarize my highlights". |
+| **Persistence** | History is saved per attachment and restored next time; save any conversation as a Zotero note. |
+| **Provider-agnostic** | OpenAI `chat/completions`, OpenAI `responses`, Anthropic `messages`, and compatible gateways (DeepSeek, Moonshot, local Ollama / vLLM). |
 
 ## Install
 
-1. Download `ai-reader.xpi` from [Releases](https://github.com/dongZheX/zotero-ai-reader/releases) or the repository.
-2. In Zotero: **Tools → Add-ons → gear menu → Install Add-on From File…**, then pick `ai-reader.xpi`.
+1. Download `ai-reader.xpi` from [Releases](https://github.com/dongZheX/zotero-ai-reader/releases) or the repo.
+2. Zotero: **Tools → Add-ons → gear → Install Add-on From File…**, pick the file.
 3. Restart Zotero.
 
-Works on Zotero 7 / 8 / 10 / 11. Click-to-source and figure jumps rely on the structured text (SDT) in Zotero 10+. On 7 and 8 the chat and summaries work, but precise recall needs 10+.
+Works on Zotero 7 / 8 / 10 / 11. Click-to-source needs the structured text in Zotero 10+; on 7 and 8, chat and summaries work but precise recall does not.
 
 ## Configure
 
 Open **Settings → AI Reader**:
 
-| Field | Notes | Example |
-|---|---|---|
-| API format | **Auto** picks by model name (Claude → `/messages`, OpenAI → `/responses`); or force `chat-completions` / `responses` / `anthropic` | Auto |
-| Base URL | Root endpoint; a bare host gets `/v1` appended, `http` is upgraded to `https` | `https://api.openai.com/v1` |
-| API Key | Your key | `sk-…` |
-| Model | Model name | `gpt-5` · `deepseek-chat` · `claude-opus-5-5` |
-| Output language | Reply language | 中文 / English / 日本語 |
-| Temperature | Sampling temperature | `0.3` |
-| Max characters | Upper bound on injected body text | `60000` |
-| Max output tokens | `0` means no limit (avoids truncated summaries) | `0` |
-| Serper API Key | Enables `web_search` (from [serper.dev](https://serper.dev)); optional | — |
-| Custom instructions | Extra guidance appended to the system prompt (style, term handling, format preferences); won't override citation/tool/drawing rules; optional | — |
-
-Use **Test connection** to check the setup.
+| Field | Notes |
+|---|---|
+| API format | **Auto** picks by model name (Claude → `/messages`, OpenAI → `/responses`), or force one. |
+| Base URL | A bare host gets `/v1` appended; `http` is upgraded to `https`. |
+| API Key | Your key. |
+| Model | e.g. `gpt-5`, `deepseek-chat`, `claude-opus-5-5`. |
+| Output language | 中文 / English / 日本語. |
+| Temperature | Sampling temperature. |
+| Max characters | Upper bound on injected body text. |
+| Max output tokens | `0` = no limit. |
+| Parallel tools | Read-only tool calls run up to this many at once; set `1` if your API rejects parallel requests. |
+| Serper API Key | Enables `web_search` ([serper.dev](https://serper.dev)); optional. |
+| Custom instructions | Extra guidance appended to the system prompt; optional. |
 
 ## Usage
 
 1. Select a paper with a PDF attachment, or open it in the reader.
-2. Expand the **AI Reading** section in the item pane. Click **Generate summary**, or type a question.
-3. Click a `p<page>` badge to jump and highlight. Click **Apply highlight / Apply note** to create a real annotation.
-4. In the reader, select text and right-click (or use the selection popup) for **Ask in sidebar / Explain / Translate**.
+2. Expand the **AI Reading** section. Click **Generate summary** or type a question.
+3. Click a `p<page>` badge to jump; click **Apply highlight / note** to create a real annotation.
+4. In the reader, select text for **Ask in sidebar / Explain / Translate**.
 5. Click **Save as note** to write a conversation into the item's Zotero note.
 
 ## How it works
 
 ```
 Zotero.SDT.getReader(attachmentID).materialize()
-      └─ text blocks with pageRects (page + coordinates) → [B<id> p<page>]
-                 │  injected into the system prompt (ask the model to cite with
-                 │  [B<id>], and propose annotations with [[hl:id]] / [[note:id|text]])
+      └─ text blocks with page + coordinates → [B<id> p<page>]
+                 │  system prompt: cite with [B<id>], propose [[hl:id]] / [[note:id|text]]
                  ▼
-         streaming reply → rendered with marked + KaTeX
-                 ├─ [B<id>]      → page badge → Zotero.Reader.open(id, {position})   jump + highlight
-                 └─ [[hl|note]]  → button      → Zotero.Annotations.saveFromJSON()    write into the PDF
+         streaming reply → marked + KaTeX
+                 ├─ [B<id>]      → page badge → Zotero.Reader.open()      jump + highlight
+                 └─ [[hl|note]]  → button      → Zotero.Annotations.saveFromJSON()
 ```
 
-## What goes into the prompt
+Everything that shapes the model lives in the **system message**: paper context, a style guide that cuts AI-isms, the SVG drawing rules, the selected reading skill, and your custom instructions. The conversation then runs as one continuous history — user, assistant, and tool turns (read a section, view a figure) accumulate, so earlier reads stay visible and aren't repeated. When it grows long, the oldest rounds are summarized and the recent ones kept. On Anthropic the stable prefix uses `cache_control` for prompt-cache hits, and read-only tools run in parallel.
 
-Everything that shapes the model's behavior is injected as the **system message** — there's no hidden server. Each chat request's system message is assembled from:
-
-- the base paper-reading instructions + the paper context (`systemPrompt`);
-- the de-AI **style guide** (anti-cliché/filler, keep technical terms, no literal "gold → 黄金");
-- the **SVG diagram rules** (how to draw, avoid AI-generated-design clichés);
-- your **custom instructions** from Settings — appended, never overriding the rules above;
-- the selected **reading skill**'s method (`_skillDirective`), concatenated into the system message.
-
-The selection-popup *Explain* uses the same base + style guide + custom instructions (no skill, kept short). Figure vision (`view_figure`), the per-category highlight tools, and annotations stay available under every skill. "通读并标注" additionally gets the skill's `agentInject` (e.g. peer-review focuses annotation on claims/limitations).
-
-## Build from source
+## Build
 
 ```bash
-cd zotero-ai-reader
 zip -r -q ai-reader.xpi manifest.json bootstrap.js prefs.js content locale
-```
-
-Tests (headless Node simulation covering extraction, sortIndex, annotations, retrieval, streaming, usage, Markdown + KaTeX, vision, and the API formats):
-
-```bash
 node test/sim.js   # → ALL OK
 ```
 
 ## Limitations
 
-- Click-to-source and figure jumps apply to **PDF attachments** only. EPUB and snapshots have structured text but no page coordinates, so they can be summarized and discussed but not located.
-- Long papers are truncated at the "max characters" setting; raise it for large-context models.
-- Translation is selection-based. Whole-document or layout-preserving bilingual output is out of scope (pair it with zotero-pdf-translate).
+- Click-to-source needs **PDF attachments**; EPUB and snapshots can be read but not located.
+- Long papers are truncated at "max characters"; raise it for large-context models.
+- Translation is selection-based (pair with zotero-pdf-translate for whole-document).
 
 ## Acknowledgements
 
-The design borrows from several projects:
-
-| Project | What was borrowed |
+| Project | Borrowed |
 |---|---|
-| [Moonlight](https://www.themoonlight.io/zh) | The integrated reading-assistant interaction model |
-| [yilewang/llm-for-zotero](https://github.com/yilewang/llm-for-zotero) | Sidebar chat panel layout |
+| [Moonlight](https://www.themoonlight.io/zh) | Integrated reading-assistant model |
+| [yilewang/llm-for-zotero](https://github.com/yilewang/llm-for-zotero) | Sidebar panel layout |
 | [papersgpt/papersgpt-for-zotero](https://github.com/papersgpt/papersgpt-for-zotero) | In-Zotero Q&A engineering |
-| [cboulanger/zotero-skills](https://github.com/cboulanger/zotero-skills) | Interface ideas for AI/Zotero interaction |
-| [stark1tty/zotero-AI-Butler](https://github.com/stark1tty/zotero-AI-Butler-english) (orig. steven-jianhao-li) | Prompt templates, right-click generation, note formatting |
-| [blader/humanizer](https://github.com/blader/humanizer) | The de-AI writing rules behind the answer style guide (based on Wikipedia's "Signs of AI writing") |
-| `artifact-design` skill | The "avoid AI-generated design" guidance behind the SVG diagram rules |
-| [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | The peer-review and literature-review reading skills |
-| [S. Keshav, *How to Read a Paper*](https://web.stanford.edu/class/ee384m/Handouts/HowtoReadPaper.pdf) | The three-pass reading skill |
+| [cboulanger/zotero-skills](https://github.com/cboulanger/zotero-skills) | AI/Zotero interface ideas |
+| [stark1tty/zotero-AI-Butler](https://github.com/stark1tty/zotero-AI-Butler-english) | Prompt templates, note formatting |
+| [blader/humanizer](https://github.com/blader/humanizer) | The de-AI style guide |
+| `artifact-design` skill | "Avoid AI-generated design" for the SVG rules |
+| [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | Peer-review and survey reading skills |
+| [S. Keshav, *How to Read a Paper*](https://web.stanford.edu/class/ee384m/Handouts/HowtoReadPaper.pdf) | Three-pass reading skill |
 
 ## License
 

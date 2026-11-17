@@ -66,6 +66,13 @@
     </hbox>
 
     <hbox align="center">
+      <label class="aireader-pref-label" data-l10n-id="aireader-prefs-parallel" control="aireader-parallel">并行读图/工具数 Parallel tools (1 = 串行)</label>
+      <html:input id="aireader-parallel" type="number" size="4" min="1" max="8"
+                  preference="extensions.zotero.aireader.maxParallelTools"
+                  placeholder="3"/>
+    </hbox>
+
+    <hbox align="center">
       <label class="aireader-pref-label" data-l10n-id="aireader-prefs-serperkey" control="aireader-serperkey">Serper API Key (web search)</label>
       <html:input id="aireader-serperkey" type="password" style="flex:1;"
                   preference="extensions.zotero.aireader.serperKey"

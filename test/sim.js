@@ -433,7 +433,7 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    assert(body.stream===true,'stream flag '+fmt);
    if(fmt==='chat'){ assert(url.endsWith('/chat/completions'),'chat url'); assert(hdr.Authorization,'chat auth'); assert(body.messages.length===2,'chat msgs'); }
    if(fmt==='responses'){ assert(url.endsWith('/responses'),'resp url'); assert(Array.isArray(body.input),'resp input'); }
-   if(fmt==='anthropic'){ assert(url.endsWith('/messages'),'ant url'); assert(hdr['x-api-key'],'ant key header'); assert(hdr['anthropic-version'],'ant version'); assert(body.system==='S','ant system split'); assert(body.messages.length===1&&body.messages[0].role==='user','ant msgs exclude system'); assert(body.max_tokens>0,'ant max_tokens'); }
+   if(fmt==='anthropic'){ assert(url.endsWith('/messages'),'ant url'); assert(hdr['x-api-key'],'ant key header'); assert(hdr['anthropic-version'],'ant version'); assert(Array.isArray(body.system)&&body.system[0].text==='S'&&body.system[0].cache_control,'ant system split + cache_control'); assert(body.messages.length===1&&body.messages[0].role==='user','ant msgs exclude system'); assert(body.max_tokens>0,'ant max_tokens'); }
    const sample = fmt==='chat'?{choices:[{message:{content:'X'}}]} : fmt==='responses'?{output:[{content:[{text:'X'}]}]} : {content:[{text:'X'}]};
    assert(A._extractContent(fmt,sample)==='X','extract '+fmt);
    const frame = fmt==='chat'?{choices:[{delta:{content:'d'}}]} : fmt==='responses'?{type:'response.output_text.delta',delta:'d'} : {type:'content_block_delta',delta:{type:'text_delta',text:'d'}};
@@ -650,6 +650,126 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    assert(labels2.includes('三句话')&&labels2.includes('总结(含图表)'),'common chips stay across skills');
    delete prefs['aireader.skill'];
    console.log('reading skills (SKILLS, directive, chips swap, common stay): OK');
+ }
+
+ // ---- reasoning / thought-signature round-trip (Claude thinking, OpenAI reasoning) ----
+ { // anthropic: accumulate a thinking block + its signature, then replay it FIRST
+   const racc={};
+   A._streamReasoningDelta('anthropic',{type:'content_block_start',index:0,content_block:{type:'thinking',thinking:''}},racc);
+   A._streamReasoningDelta('anthropic',{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'因为'}},racc);
+   A._streamReasoningDelta('anthropic',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'SIG123'}},racc);
+   const r=A._finalizeReasoning(racc);
+   assert(r.length===1 && r[0].type==='thinking' && r[0].thinking==='因为' && r[0].signature==='SIG123','anthropic thinking+signature accumulated');
+   const m1=[]; A._pushAssistantToolTurn('anthropic', m1, { text:'', calls:[{id:'t1',name:'list_sections',args:{}}], reasoning:r });
+   const c=m1[0].content;
+   assert(c[0].type==='thinking' && c[0].signature==='SIG123' && c[c.length-1].type==='tool_use','thinking replayed first, before tool_use');
+   const p=A._parseToolCalls('anthropic',{content:[{type:'thinking',thinking:'t',signature:'s'},{type:'tool_use',id:'x',name:'n',input:{}}]});
+   assert(p.reasoning.length===1 && p.reasoning[0].signature==='s','anthropic non-stream parse keeps thinking block');
+ }
+ { // responses: keep reasoning item, replay it (with id) before the function_call
+   const racc={};
+   A._streamReasoningDelta('responses',{type:'response.output_item.added',output_index:0,item:{type:'reasoning',id:'rs_1',summary:[]}},racc);
+   const r=A._finalizeReasoning(racc);
+   assert(r.length===1 && r[0].id==='rs_1','responses reasoning item captured');
+   const m2=[]; A._pushAssistantToolTurn('responses', m2, { text:'', calls:[{id:'c1',name:'f',args:{}}], reasoning:r });
+   assert(m2[0].type==='reasoning' && m2[0].id==='rs_1' && m2[1].type==='function_call','reasoning item replayed before function_call');
+ }
+ // a no-tools request (the wrap-up / plain chat) omits the tools field entirely
+ assert(!/"tools"/.test(A._toolBody('chat',[{role:'user',content:'x'}],null,false)),'no tools field when tools is null (chat)');
+ assert(!/"tools"/.test(A._toolBody('anthropic',[{role:'user',content:'x'}],[],false)),'no tools field when tools empty (anthropic)');
+ // anthropic: generous max_tokens (no 8000 truncation) + prompt-cache on system
+ { const o=JSON.parse(A._toolBody('anthropic',[{role:'system',content:'S'},{role:'user',content:'u'}],[],false));
+   assert(o.max_tokens===32000,'anthropic tool-path max_tokens is 32000 (not 8000)');
+   assert(Array.isArray(o.system)&&o.system[0].cache_control&&o.system[0].cache_control.type==='ephemeral','anthropic system carries ephemeral cache_control');
+ }
+ // cache-hit tokens surfaced from usage
+ { const m={}; A._captureUsage(m,{usage:{input_tokens:100,output_tokens:20,cache_read_input_tokens:900}}); assert(m.cacheRead===900,'cache_read surfaced'); }
+ // continuous reading context: read sections / figures live in global per-key stores,
+ // replayed into the popup/agent via _priorContextForKey
+ { A._readStore=new Map(); A._figStore=new Map();
+   A._readFor('KZ').set(2,{title:'Method',text:'[B9 p3] foo'});
+   A._figFor('KZ').set(9,{page:'4',kind:'图',desc:'a scatter plot'});
+   const pc=A._priorContextForKey('KZ');
+   assert(/已读资料/.test(pc)&&/Method/.test(pc)&&/foo/.test(pc)&&/scatter plot/.test(pc),'prior context replays read sections + figures');
+   assert(/不要再 read_section/.test(pc),'prior context tells model not to re-read');
+   // a different (unread) attachment yields no prior context
+   assert(A._priorContextForKey('KW')==='','no prior context for an attachment nothing was read from');
+   assert(A._priorContextForKey(null)==='','no prior context without a key');
+   A._readStore=new Map(); A._figStore=new Map();
+ }
+ // continuous live history: _ensureLive rebuilds from text hist; rebuilds on key/fmt change
+ { const sv=A._fmt; A._fmt=()=>'anthropic';
+   A._chatStore=new Map(); A._chatStore.set('LK',[{role:'user',content:'q1'},{role:'assistant',content:'a1'}]);
+   const st={ attachment:{key:'LK'} };
+   A._ensureLive(st);
+   assert(st.live && st.live.key==='LK' && st.live.fmt==='anthropic','live initialised with key+fmt');
+   assert(st.live.messages.length===2 && st.live.messages[0].content==='q1','live seeded from text hist (text turns only)');
+   // push a native tool turn (anthropic blocks) — survives to the next _ensureLive (no change)
+   st.live.messages.push({role:'assistant',content:[{type:'tool_use',id:'t1',name:'read_section',input:{index:0}}]});
+   st.live.messages.push({role:'user',content:[{type:'tool_result',tool_use_id:'t1',content:'sec0'}]});
+   A._ensureLive(st);
+   assert(st.live.messages.length===4,'live persists tool turns across _ensureLive when key+fmt unchanged');
+   // tool_result (role:user, array content) is NOT a user round boundary
+   assert(!A._isUserTurn(st.live.messages[3]) && A._isUserTurn(st.live.messages[0]),'tool_result user-role array is not a round boundary');
+   // fmt change rebuilds from text hist, dropping format-specific tool turns
+   A._fmt=()=>'chat'; A._ensureLive(st);
+   assert(st.live.fmt==='chat' && st.live.messages.length===2,'fmt change rebuilds live from text hist');
+   A._fmt=sv; A._chatStore=new Map();
+ }
+ // regen rollback: drop the last answer + its tool turns, keep the last user turn
+ { const st={ live:{ key:'R', fmt:'chat', messages:[
+     {role:'user',content:'q1'},{role:'assistant',content:'a1'},
+     {role:'user',content:'q2'},{role:'assistant',content:'',tool_calls:[{id:'x'}]},{role:'tool',content:'r'},{role:'assistant',content:'a2'} ] } };
+   A._rollbackLiveToLastUser(st);
+   assert(st.live.messages.length===3 && st.live.messages[2].content==='q2','rollback keeps last user turn, drops its answer + tool turns');
+ }
+ // _turnsToText flattens all three formats to readable prose
+ { const txt=A._turnsToText([
+     {role:'user',content:'问题A'},
+     {role:'assistant',content:'答A'},
+     {role:'tool',content:'chatToolOut'},                                  // openai chat
+     {type:'function_call',name:'read_section'},                            // responses
+     {type:'function_call_output',output:'respToolOut'},
+     {role:'assistant',content:[{type:'text',text:'答B'},{type:'tool_use',name:'view_figure'}]}, // anthropic
+     {role:'user',content:[{type:'tool_result',content:'anthToolOut'}]} ]);
+   assert(/用户：问题A/.test(txt)&&/助手：答A/.test(txt),'turnsToText: text turns');
+   assert(/chatToolOut/.test(txt)&&/respToolOut/.test(txt)&&/anthToolOut/.test(txt),'turnsToText: tool outputs from all 3 formats');
+   assert(/read_section/.test(txt)&&/view_figure/.test(txt),'turnsToText: tool call names');
+   assert(/助手：答B/.test(txt),'turnsToText: anthropic text block attributed to assistant');
+ }
+ // _compactLive: summarises oldest whole rounds, keeps recent, never severs tool pairs; below trigger = no-op
+ { const sv=A.callLLM; A.callLLM=async()=>'摘要内容';
+   const small={ live:{ key:'C', fmt:'chat', messages:[{role:'user',content:'q'},{role:'assistant',content:'a'}] } };
+   await A._compactLive(small, null);
+   assert(small.live.messages.length===2,'compact is a no-op below the trigger');
+   const big='x'.repeat(70000);
+   const st={ live:{ key:'C', fmt:'chat', messages:[
+     {role:'user',content:'oldQ'},{role:'assistant',content:big},
+     {role:'user',content:'recentQ'},{role:'assistant',content:big} ] } };
+   await A._compactLive(st, null);
+   const m=st.live.messages;
+   assert(A._isUserTurn(m[0]) && /早期阅读与对话摘要/.test(m[0].content) && /摘要内容/.test(m[0].content),'compact replaces older rounds with a summary note');
+   assert(m.some(x=>x.content==='recentQ'),'compact keeps the most recent round');
+   assert(m.length < 4,'compact shrank the history');
+   A.callLLM=sv;
+ }
+ console.log('reasoning round-trip + no-tools body: OK');
+
+ // ---- parallel tool execution (read-only concurrent, writes serial) ----
+ { const orig=A._execTool, origGet=A.getPref;
+   let active=0, maxActive=0; const order=[];
+   A._execTool=async(st,c,call)=>{ active++; maxActive=Math.max(maxActive,active); order.push(call.name); await new Promise(r=>setTimeout(r,5)); active--; return { output: JSON.stringify({ ok: call.name }), render: { label: call.name } }; };
+   const calls=[{id:'1',name:'view_figure'},{id:'2',name:'view_figure'},{id:'3',name:'view_figure'},{id:'4',name:'highlight'}];
+   A.getPref=(k)=> k==='maxParallelTools'?3:origGet.call(A,k);
+   const slots=await A._runToolCalls({},{run:{keys:[]}},calls);
+   assert(slots.length===4 && JSON.parse(slots[0].output).ok==='view_figure' && JSON.parse(slots[3].output).ok==='highlight','results aligned with calls');
+   assert(maxActive>=2,'read-only calls run concurrently (maxParallelTools=3)');
+   A.getPref=(k)=> k==='maxParallelTools'?1:origGet.call(A,k);
+   active=0; maxActive=0;
+   await A._runToolCalls({},{run:{keys:[]}},calls);
+   assert(maxActive===1,'maxParallelTools=1 forces serial');
+   A._execTool=orig; A.getPref=origGet;
+   console.log('parallel tool execution (concurrent read-only, serial writes): OK');
  }
 
  // ---- web tools: web_search (Serper) + web_fetch ----
