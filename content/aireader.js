@@ -572,6 +572,22 @@ AIReader = {
     state.status.textContent = msg || "";
     state.status.className = "aireader-status" + (kind ? " aireader-status-" + kind : "");
   },
+  // Elapsed-seconds ticker for silent waits (prefill before the first token, the
+  // blocking vision call, tool execution). Turns a static "正在思考…" into
+  // "正在思考… · 8s" so a long wait reads as alive, not frozen.
+  _startWait(state, label) {
+    this._stopWait(state);
+    const t0 = Date.now();
+    const tick = () => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      this.setStatus(state, s >= 1 ? (label + " · " + s + "s") : label, "busy");
+      try { state._waitTimer = setTimeout(tick, 1000); if (state._waitTimer && state._waitTimer.unref) state._waitTimer.unref(); } catch (e) {}
+    };
+    tick();
+  },
+  _stopWait(state) {
+    if (state && state._waitTimer) { try { clearTimeout(state._waitTimer); } catch (e) {} state._waitTimer = null; }
+  },
 
   async hydrate(body, item, doc) {
     const state = this._bodyState.get(body);
@@ -594,7 +610,7 @@ AIReader = {
       if (!hist) { hist = (await this.loadChat(att)) || []; this._chatStore.set(att.key, hist); }
       this.renderChatHistory(state, hist);
       this.setStatus(state, "", "muted");
-    } catch (e) { this.log("hydrate error: " + e); this.setStatus(state, "Error: " + e.message, "error"); }
+    } catch (e) { this.log("hydrate error: " + e); this.setStatus(state, this._friendlyError(e), "error"); }
   },
 
   requireKey(state) {
@@ -1162,7 +1178,9 @@ AIReader = {
           if (cut == null) { this._clearDrawing(turnEl); if (force || text !== lastRendered) { try { this.renderRich(state, turnEl, text); } catch (e) { turnEl.textContent = text; } lastRendered = text; } }
           else { if (force || cut !== lastRendered) { try { this.renderRich(state, turnEl, cut); } catch (e) { turnEl.textContent = cut; } lastRendered = cut; } this._showDrawing(state, turnEl); }
         };
+        this._startWait(state, round === 0 ? "正在思考…" : "继续生成…"); // ticks until the first token arrives
         const res = await this._streamAnswer(withSys(), tools, (d) => {
+          this._stopWait(state);
           acc += d;
           const el = state.chatMsgs;
           const stick = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
@@ -1171,13 +1189,16 @@ AIReader = {
           this.setStatus(state, "生成中… " + acc.length + " 字", "busy");
           if (stick) el.scrollTop = el.scrollHeight;
         }, () => state.cancel, meta);
+        this._stopWait(state);
         paint(res.text || "", true); // still hide any in-progress diagram source (final SVG is drawn by enhanceMessage below)
         if (res.calls && res.calls.length && !state.cancel) {
           this._pushAssistantToolTurn(fmt0, convo, { text: res.text, calls: res.calls, reasoning: res.reasoning });
           ensureToolLog();
-          this.setStatus(state, "调用工具中…", "busy");
+          const hasVision = res.calls.some((c) => c.name === "view_figure");
+          this._startWait(state, hasVision ? "正在识读图表…" : "调用工具中…"); // vision is a blocking sub-call; show it's working
           const results = [];
           const slots = await this._runToolCalls(state, tc, res.calls);
+          this._stopWait(state);
           res.calls.forEach((call, i) => { const r = slots[i]; this._appendToolGrouped(state, toolLog, grp, r.render); results.push({ id: call.id, name: call.name, output: r.output }); });
           this._pushToolResults(fmt0, convo, results);
           answerEl = this._el(state.doc, "div", "aireader-answer"); bubble.appendChild(answerEl);
@@ -1199,7 +1220,9 @@ AIReader = {
           else { if (force || cut !== lastRend2) { try { this.renderRich(state, fin, cut); } catch (e) { fin.textContent = cut; } lastRend2 = cut; } this._showDrawing(state, fin); }
         };
         try {
-          const res2 = await this._streamAnswer(withSys(), null, (d) => { acc2 += d; const now = Date.now(); if (now - lastR2 > 140) { lastR2 = now; paint2(acc2); } this.setStatus(state, "整理回答… " + acc2.length + " 字", "busy"); if (state.chatMsgs) state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight; }, () => state.cancel, meta);
+          this._startWait(state, "整理回答…");
+          const res2 = await this._streamAnswer(withSys(), null, (d) => { this._stopWait(state); acc2 += d; const now = Date.now(); if (now - lastR2 > 140) { lastR2 = now; paint2(acc2); } this.setStatus(state, "整理回答… " + acc2.length + " 字", "busy"); if (state.chatMsgs) state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight; }, () => state.cancel, meta);
+          this._stopWait(state);
           paint2(res2.text || acc2, true);
           full = res2.text || acc2 || "";
         } catch (e) { this.log("final wrap-up failed: " + e); }
@@ -1218,8 +1241,9 @@ AIReader = {
       if (opts.autoApply) { const { count } = await this.autoApplyDirectives(state, full); this.setStatus(state, count ? ("已自动高亮 " + count + " 处。") : "未识别到可高亮的句子。", count ? "ok" : "muted"); }
     } catch (e) {
       bubble.classList.remove("aireader-streaming");
-      bubble.textContent = (state.cancel ? "（已停止）" : "Error: " + e.message);
+      bubble.textContent = (state.cancel ? "（已停止）" : this._friendlyError(e));
     } finally {
+      this._stopWait(state);
       state.streaming = false; this.updateSendButton(state);
     }
   },
@@ -1372,10 +1396,10 @@ AIReader = {
   // SVG source never flashes). Appended once; survives across throttled renders
   // because we skip re-rendering the unchanged prose, keeping the spin animation.
   _showDrawing(state, el) {
-    const last = el.lastChild;
-    if (last && last.classList && last.classList.contains("aireader-drawing")) return;
-    const d = this._el(state.doc, "div", "aireader-drawing", "正在绘制图示…");
-    el.appendChild(d);
+    let d = el.querySelector && el.querySelector(".aireader-drawing");
+    if (!d) { d = this._el(state.doc, "div", "aireader-drawing"); el.appendChild(d); state._drawT0 = Date.now(); }
+    const s = Math.round((Date.now() - (state._drawT0 || Date.now())) / 1000);
+    d.textContent = s >= 1 ? ("正在绘制图示… " + s + "s") : "正在绘制图示…";
   },
   _clearDrawing(el) {
     try { const d = el.querySelector && el.querySelector(".aireader-drawing"); if (d) d.remove(); } catch (e) {}
@@ -2651,6 +2675,24 @@ AIReader = {
     return (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || "";
   },
   _fail(resp, raw) { return new Error("HTTP " + resp.status + " " + resp.statusText + "\n" + (raw || "").slice(0, 1200)); },
+
+  // Turn a raw error into a short, actionable Chinese hint (keeps the original
+  // text appended, so a wrong Base URL / format / key is diagnosable at a glance
+  // instead of a bare "Error: HTTP 401 …").
+  _friendlyError(e) {
+    const raw = (e && e.message) ? String(e.message) : String(e || "出错了");
+    const m = raw.toLowerCase();
+    if (/base url 未设置|api key 未设置/.test(raw)) return raw; // already clear + actionable
+    const tip = (t) => t + "\n\n（原始信息：" + raw.slice(0, 300) + "）";
+    if (/abort|timeout|timed ?out/.test(m)) return tip("请求超时。回答太长或网络较慢时容易这样——可以重试，或在设置里调小「最大发送字符数」。");
+    if (/http 401|http 403|unauthorized|forbidden|invalid.?api.?key|invalid_api_key/.test(m)) return tip("API Key 无效或没有权限。到设置里确认 Key，以及它是否对应当前 Base URL 的服务。");
+    if (/http 404|not found|no such|unknown model|does not exist/.test(m)) return tip("接口或模型找不到。检查 Base URL、「接口格式」和模型名是否匹配。");
+    if (/http 429|rate.?limit|too many requests|quota/.test(m)) return tip("触发限流或额度不足。稍等再试，或换一个 Key / 模型。");
+    if (/http 5\d\d|internal server|bad gateway|service unavailable|overloaded/.test(m)) return tip("服务端出错（5xx），通常是对面临时故障，稍后重试。");
+    if (/network|failed to fetch|fetch failed|enotfound|econnrefused|socket hang|dns|网络请求失败/.test(m)) return tip("连不上接口。检查网络、Base URL 是否正确、是否需要代理。");
+    if (/非 json|not json|unexpected token|无法从响应|无法提取结构化文本/.test(m)) return tip("返回的内容不是预期格式。多半是 Base URL 或「接口格式」选错了（比如给 OpenAI 服务选了 Anthropic 格式）。");
+    return raw;
+  },
   _parseOrThrow(raw) { try { return JSON.parse(raw); } catch (e) { throw new Error("响应不是 JSON（Base URL 或 API 格式可能不对）。实际返回：\n" + (raw || "").slice(0, 1200)); } },
 
   // fetch with an idle timeout and one automatic retry on a *network* failure

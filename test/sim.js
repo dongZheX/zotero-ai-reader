@@ -23,7 +23,9 @@ const fetchMock=async(url,opts)=>{
 
 function stubEl(){ const e={children:[],className:'',style:{},dataset:{},_text:'',
   classList:{add(){},remove(){},toggle(){}}, setAttribute(){}, addEventListener(){},
-  appendChild(c){e.children.push(c); return c;}, createdBy:null,
+  appendChild(c){e.children.push(c); if(c&&typeof c==='object')c.parentNode=e; return c;}, createdBy:null,
+  querySelector(sel){ const cls=String(sel).replace(/^\./,''); const find=(n)=>{ for(const c of (n.children||[])){ if(c&&c.className===cls)return c; const r=find(c); if(r)return r;} return null; }; return find(e); },
+  remove(){ if(e.parentNode&&e.parentNode.children){ const i=e.parentNode.children.indexOf(e); if(i>=0)e.parentNode.children.splice(i,1);} },
   get childNodes(){return e.children;},
   set textContent(v){ e._text=v; if(v==='')e.children=[]; }, get textContent(){return e._text;} };
   return e; }
@@ -762,6 +764,32 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    assert(m.some(x=>x.content==='recentQ'),'compact keeps the most recent round');
    assert(m.length < 4,'compact shrank the history');
    A.callLLM=sv;
+ }
+ // wait ticker: shows a busy label while a silent phase runs, and clears its timer on stop
+ { const st={ status:stubEl() };
+   A._startWait(st,'正在思考…');
+   assert(/正在思考…/.test(st.status.textContent)&&st._waitTimer,'startWait sets a busy label and arms a timer');
+   A._stopWait(st);
+   assert(!st._waitTimer,'stopWait clears the timer');
+ }
+ // drawing placeholder: single node reused across paints, shows elapsed, cleared when the fence closes
+ { const st={ doc }; const el=stubEl();
+   A._showDrawing(st, el); A._showDrawing(st, el);
+   const draws=collect(el,'aireader-drawing');
+   assert(draws.length===1,'only one drawing placeholder across repeated paints');
+   assert(/正在绘制图示…/.test(draws[0].textContent),'drawing placeholder shows the label');
+   A._clearDrawing(el);
+   assert(collect(el,'aireader-drawing').length===0,'clearDrawing removes the placeholder');
+ }
+ // friendly errors: map common failures to an actionable hint, keep the raw text
+ { const f=(msg)=>A._friendlyError(new Error(msg));
+   assert(/超时/.test(f('The operation was aborted')),'abort/timeout → 超时 hint');
+   assert(/Key/.test(f('HTTP 401 Unauthorized')),'401 → key hint');
+   assert(/限流|额度/.test(f('HTTP 429 rate limit exceeded')),'429 → rate-limit hint');
+   assert(/接口格式|格式/.test(f('Unexpected token < in JSON')),'non-JSON → format hint');
+   assert(/连不上|网络/.test(f('网络请求失败（已重试）：Failed to fetch')),'network → connectivity hint');
+   assert(f('Base URL 未设置')==='Base URL 未设置','already-clear messages pass through unchanged');
+   assert(/原始信息/.test(f('HTTP 401 Unauthorized')),'raw text appended for diagnosis');
  }
  console.log('reasoning round-trip + no-tools body: OK');
 
