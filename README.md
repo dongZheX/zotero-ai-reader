@@ -41,6 +41,7 @@ Two things make it more than a chat box:
 | **Click-to-source** | `[B<id>]` citations render as page badges. Click to jump and highlight the matching block in the reader. |
 | **AI annotations** | The model proposes highlights/notes; you apply them with one click as native annotations. The `✕` removes every annotation it added at that spot. |
 | **Agentic read & annotate** | One click (**✨ 通读并标注**) sends the agent through the whole paper and applies colour-coded highlights + notes for the key points — contribution (yellow), method (green), result (blue), limitation (red), key term (purple). Fully automatic, de-duplicated and idempotent, with a live progress log and a one-click **undo this run**. |
+| **Reading skills** | Pick a reading mode from the panel header — 精读理解 (default), 同行评审 (peer review), 三遍速读 (Keshav), 领域综述, 可复现复刻, 批判红队, 导师讲解, 速览. Switching swaps the quick-action chips and injects that method into the prompt; figure/annotation abilities stay available across skills. |
 | **Figure & table vision** | Render a figure or table region to an image and send it to a multimodal model, instead of reading only the caption text. |
 | **Web search & fetch** | The model can call `web_search` (Google via Serper — set a Serper key in settings) and `web_fetch` (read a page as text) to check background, recent work, or terms beyond the paper. `web_fetch` works without a key; `web_search` only appears once a Serper key is set. |
 | **Inline diagrams (SVG)** | The model can draw a diagram with a fenced ` ```svg ` block; it renders inline (sanitized, scaled to fit the panel). The raw source is hidden while it streams — you see a "正在绘制…" animation, then the finished figure. Summary presets (总结全文 / 含图表 / 核心贡献 / 主要结论) ask for a diagram by default. |
@@ -97,6 +98,18 @@ Zotero.SDT.getReader(attachmentID).materialize()
                  └─ [[hl|note]]  → button      → Zotero.Annotations.saveFromJSON()    write into the PDF
 ```
 
+## What goes into the prompt
+
+Everything that shapes the model's behavior is injected as the **system message** — there's no hidden server. Each chat request's system message is assembled from:
+
+- the base paper-reading instructions + the paper context (`systemPrompt`);
+- the de-AI **style guide** (anti-cliché/filler, keep technical terms, no literal "gold → 黄金");
+- the **SVG diagram rules** (how to draw, avoid AI-generated-design clichés);
+- your **custom instructions** from Settings — appended, never overriding the rules above;
+- the selected **reading skill**'s method (`_skillDirective`), concatenated into the system message.
+
+The selection-popup *Explain* uses the same base + style guide + custom instructions (no skill, kept short). Figure vision (`view_figure`), the per-category highlight tools, and annotations stay available under every skill. "通读并标注" additionally gets the skill's `agentInject` (e.g. peer-review focuses annotation on claims/limitations).
+
 ## Build from source
 
 ```bash
@@ -129,6 +142,8 @@ The design borrows from several projects:
 | [stark1tty/zotero-AI-Butler](https://github.com/stark1tty/zotero-AI-Butler-english) (orig. steven-jianhao-li) | Prompt templates, right-click generation, note formatting |
 | [blader/humanizer](https://github.com/blader/humanizer) | The de-AI writing rules behind the answer style guide (based on Wikipedia's "Signs of AI writing") |
 | `artifact-design` skill | The "avoid AI-generated design" guidance behind the SVG diagram rules |
+| [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | The peer-review and literature-review reading skills |
+| [S. Keshav, *How to Read a Paper*](https://web.stanford.edu/class/ee384m/Handouts/HowtoReadPaper.pdf) | The three-pass reading skill |
 
 ## License
 

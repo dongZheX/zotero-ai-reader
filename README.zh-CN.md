@@ -41,6 +41,7 @@
 | **点击溯源** | 回答里的 `[B<id>]` 渲染成页码徽标，点一下跳转并高亮阅读器里对应的文本块。 |
 | **AI 写标注** | 模型建议划线/批注，你一键应用为原生标注。`✕` 会把它在那个位置加的标注全部删掉。 |
 | **Agent 通读并标注** | 一键（**✨ 通读并标注**）让 agent 读完整篇论文，自动按类别打上**彩色**高亮+批注——贡献（黄）、方法（绿）、结果（蓝）、局限（红）、关键概念（紫）。全自动、去重且幂等，面板实时显示进度，并提供一键**撤销本次标注**。 |
+| **阅读技能** | 在面板顶部选择阅读模式——精读理解（默认）、同行评审、三遍速读（Keshav）、领域综述、可复现复刻、批判红队、导师讲解、速览。切换会换掉下方快捷按钮并把该技能的方法注入上下文；图表/批注能力在各技能下始终可用。 |
 | **图表视觉解读** | 把图或表的区域渲染成图像交给多模态模型，而不是只读 caption 文本。 |
 | **联网搜索与抓取** | 模型可调用 `web_search`（Google via Serper，需在设置里填 Serper Key）和 `web_fetch`（把网页读成正文）来核对论文之外的背景、最新进展或术语。`web_fetch` 无需 Key；`web_search` 仅在填入 Serper Key 后出现。 |
 | **对话内画图（SVG）** | 模型可用 ` ```svg ` 代码块画示意图，直接内联渲染（已净化、自动缩放适配面板宽度）。生成时**不显示源码**，只显示「正在绘制…」动画，完成后呈现图形。总结类预设（总结全文 / 含图表 / 核心贡献 / 主要结论）默认附带一张示意图。 |
@@ -97,6 +98,18 @@ Zotero.SDT.getReader(attachmentID).materialize()
                  └─ [[hl|note]]  → 按钮      → Zotero.Annotations.saveFromJSON()    写入 PDF
 ```
 
+## 提示词里有什么
+
+决定模型行为的内容都作为**系统提示（system 消息）**注入，没有隐藏的服务端。每次对话的 system 消息由这些拼成：
+
+- 基础阅读指令 + 论文上下文（`systemPrompt`）；
+- 去 AI 味的**风格指南**（去套话/夸大、保留术语、不把 gold 直译成"黄金"）；
+- **SVG 作图规则**（怎么画、避免 AI 设计套路）；
+- 设置里的**自定义指令**——追加注入，不覆盖上面的规则；
+- 当前选中的**阅读技能**的方法（`_skillDirective`），拼入 system 消息。
+
+选中弹窗的「AI 解释」用相同的基础 + 风格指南 + 自定义指令（不加技能，保持简短）。图表识读（`view_figure`）、按类别高亮工具、批注在任何技能下都可用。「通读并标注」还会额外带上技能的 `agentInject`（如同行评审会让标注聚焦贡献/局限）。
+
 ## 从源码构建
 
 ```bash
@@ -129,6 +142,8 @@ node test/sim.js   # → ALL OK
 | [stark1tty/zotero-AI-Butler](https://github.com/stark1tty/zotero-AI-Butler-english)（原作 steven-jianhao-li） | Prompt 模板、右键生成、笔记排版 |
 | [blader/humanizer](https://github.com/blader/humanizer) | 回答风格指南里的去 AI 味规则（基于 Wikipedia「Signs of AI writing」） |
 | `artifact-design` skill | SVG 绘图规则里「避免 AI 设计套路」的指导 |
+| [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | 同行评审、领域综述两个阅读技能 |
+| [S. Keshav《How to Read a Paper》](https://web.stanford.edu/class/ee384m/Handouts/HowtoReadPaper.pdf) | 三遍速读技能 |
 
 ## 许可
 

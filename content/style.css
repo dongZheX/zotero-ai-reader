@@ -38,7 +38,7 @@
 }
 
 /* ---- top row (save-note + settings) ---- */
-.aireader-top { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.aireader-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 20px; }
 .aireader-top-btn {
   font-size: 11.5px;
   padding: 3px 10px;
@@ -511,10 +511,24 @@
    font can be a Zotero icon font, which turns model-name text into garbage
    glyphs ("乱码"). Pin an explicit UI font stack on every descendant. */
 .aireader-modelmenu,
-.aireader-modelmenu * {
+.aireader-modelmenu *,
+.aireader-skillmenu,
+.aireader-skillmenu * {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", Helvetica, Arial, sans-serif;
 }
+/* skill picker drops DOWN from the top button row (model menu pops UP) */
+.aireader-skillmenu {
+  position: absolute; left: 4px; right: 4px; top: 34px; z-index: 21;
+  background: var(--air-surface, Canvas); color: var(--fill-primary, CanvasText);
+  border: 1px solid var(--air-border); border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.22); padding: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 62vh; overflow-y: auto; overscroll-behavior: contain;
+}
+.aireader-skillitem { border-radius: 8px; }
+.aireader-skillitem-t { font-size: 12.5px; line-height: 1.4; }
+.aireader-skillitem-d { font-size: 11px; line-height: 1.3; }
 .aireader-fmtrow { display: flex; gap: 6px; }
 .aireader-fmt {
   flex: 1;

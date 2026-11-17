@@ -8,3 +8,4 @@ pref("extensions.zotero.aireader.maxChars", 60000);
 pref("extensions.zotero.aireader.maxTokens", 0);
 pref("extensions.zotero.aireader.serperKey", "");
 pref("extensions.zotero.aireader.customPrompt", "");
+pref("extensions.zotero.aireader.skill", "deep-read");

@@ -618,12 +618,39 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    assert(svg._attr.width===undefined && svg._attr.height===undefined,'_fitSvg drops fixed px width/height');
    assert(svg.style.maxWidth==='100%','_fitSvg caps svg to container width');
  }
- // summary presets ask for an SVG diagram by default
- { const sum=A.PRESETS.find(p=>p.label==='总结全文'), tri=A.PRESETS.find(p=>p.label==='三行摘要');
+ // summary presets ask for an SVG diagram by default (deep-read skill)
+ { const dr=A.SKILLS.find(s=>s.id==='deep-read');
+   const sum=dr.presets.find(p=>p.label==='总结全文'), tri=dr.presets.find(p=>p.label==='三行摘要');
    assert(/```svg/.test(sum.q),'总结全文 preset requests an svg diagram');
    assert(!/```svg/.test(tri.q),'三行摘要 stays text-only');
  }
  console.log('artifacts (inline svg/html, stream-hide source, fit-width, summary-draws): OK');
+
+ // ---- reading skills ----
+ { assert(A.SKILLS.length>=5 && A.SKILLS.every(s=>s.id&&s.label&&s.inject&&Array.isArray(s.presets)&&s.presets.length),'SKILLS well-formed');
+   delete prefs['aireader.skill'];
+   assert(A._skillId()==='deep-read' && A.currentSkill().label==='精读理解','default skill = 精读理解');
+   assert(/精读/.test(A._skillDirective()),'directive carries the current skill method');
+   // switching skill changes the injected directive + agentInject
+   prefs['aireader.skill']='peer-review';
+   assert(A.currentSkill().id==='peer-review','skill pref switches current skill');
+   assert(/评审|Soundness/.test(A._skillDirective()),'peer-review directive injected');
+   assert(A.currentSkill().agentInject && /审稿/.test(A.currentSkill().agentInject),'peer-review carries agentInject');
+   // bad/empty pref falls back to the default skill
+   prefs['aireader.skill']='nonsense'; assert(A._skillId()==='deep-read','unknown skill id → default');
+   // renderChips: current skill presets + COMMON, with the common ones always present
+   prefs['aireader.skill']='peer-review';
+   const st3={ doc, body:{}, chips:stubEl() };
+   A.renderChips(st3);
+   const labels=collect(st3.chips,'aireader-chip').map(c=>c.textContent);
+   assert(labels.length===A.currentSkill().presets.length+A.COMMON_PRESETS.length,'chips = skill presets + common');
+   assert(labels.includes('评审总览')&&labels.includes('总结(含图表)'),'skill chip + common chip both present');
+   prefs['aireader.skill']='quick'; A.renderChips(st3);
+   const labels2=collect(st3.chips,'aireader-chip').map(c=>c.textContent);
+   assert(labels2.includes('三句话')&&labels2.includes('总结(含图表)'),'common chips stay across skills');
+   delete prefs['aireader.skill'];
+   console.log('reading skills (SKILLS, directive, chips swap, common stay): OK');
+ }
 
  // ---- web tools: web_search (Serper) + web_fetch ----
  // _htmlToText: strip markup, keep title + readable text
