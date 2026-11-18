@@ -930,6 +930,7 @@ AIReader = {
     msg.appendChild(this._el(state.doc, "div", "aireader-bubble", text));
     state.chatMsgs.appendChild(msg);
     state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight;
+    return msg;
   },
 
   appendAssistantMsg(state) {
@@ -1095,6 +1096,33 @@ AIReader = {
     this._send(state, question, { skipUser: true, broad: false });
   },
 
+  // A failed turn leaves the error bubble with a "重试" button. Re-run the same
+  // question with the same options, cleaning up the failed turn first: nothing
+  // was committed to hist (that happens only on success), and the live history
+  // is rolled back so the model doesn't see the aborted attempt.
+  _addRetry(state, errMsg, userMsg, text, opts) {
+    try {
+      const row = this._el(state.doc, "div", "aireader-actions");
+      const btn = this._el(state.doc, "span", "aireader-action", "重试");
+      btn.addEventListener("click", () => {
+        if (state.streaming) return;
+        try { errMsg.remove(); } catch (e) {}
+        if (!opts.skipUser) {
+          try { if (userMsg) userMsg.remove(); } catch (e) {}
+          // drop the failed user turn (+ any partial tool turns) from live; the
+          // re-send will re-add it.
+          if (state.live) { const msgs = state.live.messages; for (let i = msgs.length - 1; i >= 0; i--) if (this._isUserTurn(msgs[i])) { msgs.splice(i); break; } }
+        } else {
+          // regen-style retry: keep the existing user turn, drop only its partials.
+          this._rollbackLiveToLastUser(state);
+        }
+        this._send(state, text, opts);
+      });
+      row.appendChild(btn);
+      errMsg.querySelector && errMsg.querySelector(".aireader-bubble") ? errMsg.querySelector(".aireader-bubble").appendChild(row) : errMsg.appendChild(row);
+    } catch (e) { this.log("addRetry error: " + e); }
+  },
+
   onChatSend(body, forcedText, opts) {
     const state = this._bodyState.get(body);
     if (!state || !state.attachment) return;
@@ -1112,7 +1140,7 @@ AIReader = {
     let hist = this._chatStore.get(key);
     if (!hist) { hist = []; this._chatStore.set(key, hist); }
 
-    if (!opts.skipUser) this.appendUserMsg(state, text);
+    const userMsg = !opts.skipUser ? this.appendUserMsg(state, text) : null;
     const { msg, bubble } = this.appendAssistantMsg(state);
     bubble.classList.add("aireader-streaming");
     state.streaming = true; state.cancel = false; this.updateSendButton(state);
@@ -1242,6 +1270,7 @@ AIReader = {
     } catch (e) {
       bubble.classList.remove("aireader-streaming");
       bubble.textContent = (state.cancel ? "（已停止）" : this._friendlyError(e));
+      if (!state.cancel) this._addRetry(state, msg, userMsg, text, opts);
     } finally {
       this._stopWait(state);
       state.streaming = false; this.updateSendButton(state);
@@ -1255,8 +1284,13 @@ AIReader = {
       const outTok = meta.outTok != null ? meta.outTok : Math.round([...(full || "")].length / 3);
       const inTok = meta.inTok != null ? ("⬆ " + meta.inTok + " ") : "";
       const approx = meta.outTok != null ? "" : "~";
-      const ctxk = meta.ctxChars != null ? (" · 上下文 " + (meta.ctxChars >= 1000 ? (meta.ctxChars / 1000).toFixed(1) + "k" : meta.ctxChars) + " 字") : "";
-      const cache = meta.cacheRead ? (" · 缓存命中 " + (meta.cacheRead >= 1000 ? (meta.cacheRead / 1000).toFixed(1) + "k" : meta.cacheRead)) : "";
+      const kfmt = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
+      const ctxk = meta.ctxChars != null ? (" · 上下文 " + kfmt(meta.ctxChars) + " 字") : "";
+      // Show both cache read (multi-turn hit) and cache write (first turn, the
+      // cache being created) so prompt caching is visible either way.
+      let cache = "";
+      if (meta.cacheRead) cache += " · 命中缓存 " + kfmt(meta.cacheRead);
+      if (meta.cacheWrite) cache += " · 写缓存 " + kfmt(meta.cacheWrite);
       const line = this._el(doc, "div", "aireader-meta", inTok + "⬇ " + approx + outTok + " tok" + cache + ctxk);
       msg.appendChild(line);
     } catch (e) {}
@@ -2094,6 +2128,10 @@ AIReader = {
     const limit = Math.max(1, parseInt(this.getPref("maxParallelTools"), 10) || 3);
     const slots = new Array(calls.length);
     const run1 = async (i) => {
+      // Once the user hits stop, don't launch any further tool calls (the one
+      // already in flight will still finish — aborting mid-request would need a
+      // signal threaded through the whole network layer).
+      if (state && state.cancel) { slots[i] = { output: JSON.stringify({ error: "已取消" }), render: { label: calls[i].name, outcome: "✕ 已取消" } }; return; }
       try { slots[i] = await this._execTool(state, c, calls[i]); }
       catch (e) { slots[i] = { output: JSON.stringify({ error: String((e && e.message) || e) }), render: { label: calls[i].name, outcome: "✕ 失败" } }; }
     };
@@ -2610,6 +2648,7 @@ AIReader = {
   _autoFmt(model) {
     const m = (model || "").toLowerCase();
     if (/claude/.test(m)) return "anthropic";
+    if (/gpt-oss/.test(m)) return "chat"; // open-weight GPT, served via /chat/completions on gateways — not /responses
     if (/\bgpt\b|gpt-|^o[1-9]|\bo[1-9]-|openai|davinci|text-(davinci|embedding)/.test(m)) return "responses";
     return "chat";
   },

@@ -21,8 +21,10 @@ const fetchMock=async(url,opts)=>{
  return {ok:true,status:200,statusText:'OK',async text(){return JSON.stringify({choices:[{message:{content:'普通回答 [B3]'}}]});}};
 };
 
-function stubEl(){ const e={children:[],className:'',style:{},dataset:{},_text:'',
-  classList:{add(){},remove(){},toggle(){}}, setAttribute(){}, addEventListener(){},
+function stubEl(){ const e={children:[],className:'',style:{},dataset:{},_text:'',_ev:{},
+  classList:{add(){},remove(){},toggle(){}}, setAttribute(){},
+  addEventListener(t,h){ (e._ev[t]=e._ev[t]||[]).push(h); },
+  dispatch(t){ for(const h of (e._ev[t]||[])) h({stopPropagation(){},preventDefault(){}}); },
   appendChild(c){e.children.push(c); if(c&&typeof c==='object')c.parentNode=e; return c;}, createdBy:null,
   querySelector(sel){ const cls=String(sel).replace(/^\./,''); const find=(n)=>{ for(const c of (n.children||[])){ if(c&&c.className===cls)return c; const r=find(c); if(r)return r;} return null; }; return find(e); },
   remove(){ if(e.parentNode&&e.parentNode.children){ const i=e.parentNode.children.indexOf(e); if(i>=0)e.parentNode.children.splice(i,1);} },
@@ -589,6 +591,7 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  assert(A._autoFmt('claude-opus-5-5')==='anthropic','claude → anthropic /messages');
  assert(A._autoFmt('gpt-5')==='responses' && A._autoFmt('o3-mini')==='responses','openai → /responses');
  assert(A._autoFmt('deepseek-chat')==='chat' && A._autoFmt('qwen2.5')==='chat','unknown/compat gateway → chat fallback');
+ assert(A._autoFmt('gpt-oss-20b')==='chat' && A._autoFmt('gpt-oss-120b')==='chat','gpt-oss (open weights) → chat, not /responses');
  { const sf=prefs['aireader.apiFormat'], sm=prefs['aireader.model'];
    prefs['aireader.apiFormat']='auto'; prefs['aireader.model']='claude-sonnet-5-5';
    assert(A._fmt()==='anthropic','_fmt() auto resolves anthropic from model');
@@ -696,6 +699,12 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  }
  // cache-hit tokens surfaced from usage
  { const m={}; A._captureUsage(m,{usage:{input_tokens:100,output_tokens:20,cache_read_input_tokens:900}}); assert(m.cacheRead===900,'cache_read surfaced'); }
+ // meta line shows cache write (first turn) and cache read (later turns)
+ { const mk=(meta)=>{ const msg=stubEl(); A.addMetaLine({doc},msg,meta,'x'); return collect(msg,'aireader-meta')[0].textContent; };
+   assert(/写缓存 2\.0k/.test(mk({outTok:10,cacheWrite:2000})),'first turn shows cache write');
+   assert(/命中缓存 1\.8k/.test(mk({outTok:10,cacheRead:1800})),'later turn shows cache hit');
+   assert(!/缓存/.test(mk({outTok:10})),'no cache text when the API reports none');
+ }
  // continuous reading context: read sections / figures live in global per-key stores,
  // replayed into the popup/agent via _priorContextForKey
  { A._readStore=new Map(); A._figStore=new Map();
@@ -791,6 +800,19 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    assert(f('Base URL 未设置')==='Base URL 未设置','already-clear messages pass through unchanged');
    assert(/原始信息/.test(f('HTTP 401 Unauthorized')),'raw text appended for diagnosis');
  }
+ // retry button on a failed turn: re-sends the same text + opts, cleans up the failed turn
+ { const calls=[]; const sv=A._send; A._send=(st,t,o)=>{ calls.push({t,o}); };
+   const st={ doc, attachment:{key:'RT'}, chatMsgs:stubEl(), live:{key:'RT',fmt:'chat',messages:[{role:'user',content:'q'},{role:'assistant',content:'partial'}]} };
+   const errMsg=stubEl(); const eb=stubEl(); eb.className='aireader-bubble'; errMsg.appendChild(eb);
+   const userMsg=stubEl();
+   A._addRetry(st, errMsg, userMsg, 'q', { broad:false });
+   const btn=collect(errMsg,'aireader-action')[0];
+   assert(btn&&/重试/.test(btn.textContent),'retry button added to the error bubble');
+   btn.dispatch('click');
+   assert(calls.length===1 && calls[0].t==='q' && calls[0].o.broad===false,'retry re-sends the same text + opts');
+   assert(st.live.messages.length===0,'non-skipUser retry drops the failed user turn from live');
+   A._send=sv;
+ }
  console.log('reasoning round-trip + no-tools body: OK');
 
  // ---- parallel tool execution (read-only concurrent, writes serial) ----
@@ -806,6 +828,11 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    active=0; maxActive=0;
    await A._runToolCalls({},{run:{keys:[]}},calls);
    assert(maxActive===1,'maxParallelTools=1 forces serial');
+   // stop (state.cancel) short-circuits remaining tool calls without executing them
+   let execed=0; A._execTool=async()=>{ execed++; return { output:'{}', render:{} }; };
+   const cancelled=await A._runToolCalls({cancel:true},{run:{keys:[]}},calls);
+   assert(execed===0,'cancel skips _execTool entirely');
+   assert(cancelled.every(s=>/已取消/.test(s.output)),'cancelled calls return 已取消');
    A._execTool=orig; A.getPref=origGet;
    console.log('parallel tool execution (concurrent read-only, serial writes): OK');
  }
