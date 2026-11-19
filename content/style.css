@@ -214,11 +214,13 @@
 .aireader-gear {
   margin-inline-start: auto;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 12px;
   line-height: 1;
-  padding: 4px;
+  padding: 5px 9px;
   border-radius: 6px;
-  opacity: .6;
+  opacity: .85;
+  border: 1px solid var(--air-border, rgba(127,127,127,0.25));
+  white-space: nowrap;
 }
 .aireader-gear:hover { opacity: 1; background: var(--air-bubble); }
 
@@ -242,6 +244,7 @@
   min-height: 60px;
   min-width: 0;
   overflow-y: auto;
+  overflow-x: hidden; /* hard backstop: content can never push the panel wider */
   overscroll-behavior: contain;
   padding: 4px 2px;
   scrollbar-width: thin;
@@ -282,13 +285,29 @@
   border-bottom-left-radius: 4px;
 }
 /* Structural safety net — stop ANY future descendant (long URL, English tool
-   brief, wide artifact, table) from pushing an assistant bubble past the panel
-   edge. New components get this for free; no per-component whack-a-mole. */
+   brief, wide artifact, table, code block) from pushing an assistant bubble
+   past the panel edge. New components get this for free; no per-component
+   whack-a-mole. The key is the DEFINITE width below: with the old shrink-to-fit
+   bubble (align-items:flex-start), an inner max-width:100% resolved against an
+   indefinite width and the browser fell back to the child's min-content (a long
+   code line / wide cell), widening the whole panel. A definite width makes
+   max-width:100% + overflow-x:auto actually bite. */
+/* GENERAL rule — every descendant is width-capped, shrinkable, and wraps long
+   unbreakable strings. This alone catches long URLs, English briefs, inline
+   code, wide divs/images/artifacts: they can't push the bubble past the panel. */
+.aireader-msg-assistant .aireader-bubble { width: 100%; box-sizing: border-box; }
 .aireader-msg-assistant .aireader-bubble,
-.aireader-msg-assistant .aireader-bubble * { max-width: 100%; min-width: 0; }
-.aireader-msg-assistant .aireader-bubble a { overflow-wrap: anywhere; word-break: break-word; }
+.aireader-msg-assistant .aireader-bubble * { max-width: 100%; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+/* Two irreducible element overrides: <pre> and <table> have their own sizing
+   algorithms that by design IGNORE the rules above — pre defaults to
+   white-space:pre (never wraps) and an auto-layout table sizes to its content.
+   So each needs exactly one targeted nudge back into the general behaviour. */
 .aireader-msg-assistant .aireader-bubble pre,
-.aireader-msg-assistant .aireader-bubble table { display: block; overflow-x: auto; }
+.aireader-msg-assistant .aireader-bubble pre code { white-space: pre-wrap; }
+.aireader-msg-assistant .aireader-bubble table { table-layout: fixed; width: 100%; }
+.aireader-msg-assistant .aireader-bubble table { display: table; table-layout: fixed; width: 100%; }
+.aireader-msg-assistant .aireader-bubble td,
+.aireader-msg-assistant .aireader-bubble th { overflow-wrap: anywhere; word-break: break-word; }
 /* pre-wrap is only for the plain-text streaming fallback. Rich (Markdown)
    content must stay white-space:normal, or the newlines between rendered HTML
    elements show as big blank gaps mid-stream (they vanished at the end only
@@ -591,11 +610,11 @@
   font-size: 11.5px; padding: 1px 5px; border-radius: 5px;
   background: var(--fill-quarternary, rgba(127,127,127,0.18));
 }
-.aireader-rich pre {
+.aireader-rich pre, .aireader-md-pre {
   margin: 6px 0; padding: 9px 11px; border-radius: 8px; overflow-x: auto;
   background: var(--fill-quarternary, rgba(127,127,127,0.14));
 }
-.aireader-rich pre code { background: none; padding: 0; font-size: 11.5px; }
+.aireader-rich pre code, .aireader-md-pre code { background: none; padding: 0; font-size: 11.5px; white-space: pre; }
 .aireader-artifact {
   margin: 8px 0; border: 1px solid var(--air-border, rgba(127,127,127,0.25));
   border-radius: 8px; overflow: hidden; background: #fff; min-width: 0; max-width: 100%;

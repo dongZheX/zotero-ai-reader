@@ -121,6 +121,24 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    console.log('table fallback render: OK');
  }
 
+ // fenced code block in the fallback renderer: render as <pre>, never leak ``` lines
+ { const tb=stubEl();
+   A._renderLines(state, tb, '也就是说：\n```text\n环境说明\n环境状态 schema\n```\n结尾。');
+   const pres=collect(tb,'aireader-md-pre');
+   assert(pres.length===1,'fenced block rendered as one <pre>');
+   const code=(pres[0].children||[])[0];
+   assert(code && /环境说明/.test(code.textContent) && /环境状态 schema/.test(code.textContent),'code content preserved');
+   assert(!/```/.test(code.textContent),'fence markers not inside the code');
+   // no paragraph anywhere still contains a literal ``` line
+   const leaked=collect(tb,'aireader-md-p').some(p=>/```/.test(p.textContent||''));
+   assert(!leaked,'no paragraph leaks a literal ``` fence line');
+   // unterminated fence: collect to EOF without throwing
+   const tb2=stubEl();
+   A._renderLines(state, tb2, '前言\n```js\nconst x=1;');
+   assert(collect(tb2,'aireader-md-pre').length===1,'unterminated fence still renders a <pre>');
+   console.log('fenced code fallback render: OK');
+ }
+
  // streaming end-to-end via onChatSend
  const body={}; const st={ item:null, attachment:{id:7,key:'K2',libraryID:1}, blocks, doc, body:null,
    status:stubEl(), chatMsgs:stubEl(), input:{value:''}, send:stubEl(), modelPill:stubEl(), preview:stubEl(),
@@ -356,7 +374,7 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  }
 
  // list_figures / view_figure tools: the model can discover and "read" figures
- { delete prefs['aireader.serperKey']; assert(A._toolSchemas('chat').length===7,'tool schema: 5 paper tools + web_fetch + finish (no web_search without Serper key)');
+ { delete prefs['aireader.serperKey']; assert(A._toolSchemas('chat').length===10,'tool schema: 5 paper + web_fetch + 3 scholar + finish (no web_search without Serper key)');
    const figBlocks=blocks.filter(b=>(b.type==='image'||b.type==='table')&&b.position);
    const c2={ sections:A._buildSections(blocks), byId, run:{keys:[],applied:[]}, tally:{}, reads:0 };
    const stF={ attachment:{id:7,key:'KF',libraryID:1}, blocks };
@@ -885,6 +903,50 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    assert(/✕/.test(r3.render.outcome),'web_fetch rejects non-http url');
    A.webSearch=origWS; A.webFetch=origWF;
  }
+
+ // ---- scholarly discovery: lookup_paper / find_references / related_papers ----
+ // tools present unconditionally (free APIs, no key needed), in all 3 formats
+ { const names=A._agentTools().map(t=>t.name);
+   assert(names.includes('lookup_paper')&&names.includes('find_references')&&names.includes('related_papers'),'scholar tools always present');
+   for (const fmt of ['chat','anthropic','responses']) {
+     const got=A._toolSchemas(fmt).map(t=>t.name||(t.function&&t.function.name));
+     assert(got.includes('find_references'),'find_references in '+fmt+' schema');
+   }
+ }
+ // _normS2 normalizes a Semantic Scholar paper; _fmtPaperList renders a readable block
+ { const n=A._normS2({ title:'T', authors:[{name:'A'},{name:'B'}], year:2021, venue:'NeurIPS', citationCount:42, externalIds:{DOI:'10.1/x', ArXiv:'2101.00001'}, url:'http://u' });
+   assert(n.title==='T'&&n.authors.length===2&&n.year===2021&&n.citations===42&&n.doi==='10.1/x'&&n.arxiv==='2101.00001','_normS2 maps fields');
+   const body=A._fmtPaperList([n]);
+   assert(/1\. T/.test(body)&&/A, B/.test(body)&&/被引 42/.test(body),'_fmtPaperList renders title+authors+citations');
+   assert(A._fmtPaperList([])==='（无结果）','_fmtPaperList empty');
+ }
+ // _execTool routes the 3 scholar tools, mapping helper output to render + JSON
+ { const oL=A.scholarLookup, oR=A.scholarReferences, oRel=A.scholarRelated;
+   A.scholarLookup=async()=>({source:'s2',results:[{title:'P1',authors:['X'],year:2020,citations:5}]});
+   A.scholarReferences=async()=>[{title:'Ref1',authors:['Y'],year:2018}];
+   A.scholarRelated=async()=>({related:[{title:'Rel1'}],citedBy:[{title:'Cite1'},{title:'Cite2'}]});
+   const rl=await A._execTool(st,{},{name:'lookup_paper',args:{query:'foo'}});
+   assert(/查论文/.test(rl.render.label)&&JSON.parse(rl.output)[0].title==='P1','lookup_paper routes + JSON output');
+   const rf=await A._execTool(st,{},{name:'find_references',args:{}});
+   assert(/找参考文献/.test(rf.render.label)&&/1 条/.test(rf.render.outcome)&&JSON.parse(rf.output)[0].title==='Ref1','find_references routes (current paper)');
+   const rr=await A._execTool(st,{},{name:'related_papers',args:{}});
+   assert(/相关论文/.test(rr.render.label)&&/3 条/.test(rr.render.outcome)&&JSON.parse(rr.output).citedBy.length===2,'related_papers merges related+citedBy');
+   // soft error path surfaces ✕ without throwing
+   A.scholarReferences=async()=>{ throw new Error('Semantic Scholar 暂时限流'); };
+   const re=await A._execTool(st,{},{name:'find_references',args:{}});
+   assert(/✕ 失败/.test(re.render.outcome)&&/error/.test(re.output),'find_references soft-fails on throttle');
+   A.scholarLookup=oL; A.scholarReferences=oR; A.scholarRelated=oRel;
+   console.log('scholarly discovery tools: OK');
+ }
+
+ // _s2ResolveId: DOI / arXiv pass through; a title is matched via S2 (stubbed)
+ { assert(await A._s2ResolveId('10.1145/3292500.3330701')==='DOI:10.1145/3292500.3330701','DOI → DOI: id');
+   assert(await A._s2ResolveId('https://doi.org/10.1/abc')==='DOI:10.1/abc','doi.org URL → DOI: id');
+   assert(await A._s2ResolveId('arXiv:2101.00001')==='ARXIV:2101.00001','arXiv → ARXIV: id');
+   const oG=A._s2Get; A._s2Get=async(path)=>{ assert(/paper\/search\/match/.test(path),'title resolves via match endpoint'); return {data:[{paperId:'PID123',title:'T'}]}; };
+   assert(await A._s2ResolveId('Some Paper Title')==='PID123','title → matched paperId');
+   A._s2Get=oG;
+ }
  delete prefs['aireader.serperKey'];
  console.log('web tools (search gating + fetch + execTool): OK');
 
@@ -895,6 +957,13 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    assert(/\.aireader-msg \{[^}]*min-width: 0/.test(css),'.aireader-msg has min-width:0');
    assert(/\.aireader-answer \{[^}]*overflow-wrap: anywhere/.test(css),'.aireader-answer wraps long tokens');
    assert(/\.aireader-rich[^{]*\{ white-space: normal/.test(css),'rich content stays white-space:normal (no mid-stream blank gaps)');
+   // the structural overflow fix: assistant bubble has a DEFINITE width, the
+   // scroller clips horizontally, code scrolls, and tables fit-and-wrap.
+   assert(/\.aireader-msg-assistant \.aireader-bubble \{[^}]*width: 100%/.test(css),'assistant bubble has a definite width (so inner max-width:100% binds)');
+   assert(/\.aireader-chat-msgs \{[^}]*overflow-x: hidden/.test(css),'scroller clips horizontally (panel can never widen)');
+   assert(/\.aireader-bubble table \{[^}]*table-layout: fixed/.test(css),'tables are table-layout:fixed (fit + wrap, never overflow)');
+   assert(/\.aireader-bubble pre[\s\S]{0,140}white-space: pre-wrap/.test(css),'code blocks wrap (never overflow the panel)');
+   assert(/\.aireader-bubble \*[^}]*overflow-wrap: anywhere/.test(css),'general rule: every bubble descendant wraps long tokens');
    console.log('layout overflow safety net present: OK');
  }
 

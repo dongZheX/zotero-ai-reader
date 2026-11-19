@@ -281,8 +281,8 @@ AIReader = {
     const noteBtn = this._el(doc, "div", "aireader-top-btn", "存为笔记");
     noteBtn.title = "把当前对话存为 Zotero 笔记";
     noteBtn.addEventListener("click", () => this.saveNote(body));
-    const gear = this._el(doc, "div", "aireader-gear", "⚙");
-    gear.title = "Settings";
+    const gear = this._el(doc, "div", "aireader-gear", "⚙ 设置");
+    gear.title = "打开 AI Reader 设置";
     gear.addEventListener("click", () => Zotero.Utilities.Internal.openPreferences(AIReader._prefPaneID));
     top.appendChild(agentBtn);
     top.appendChild(skillBtn);
@@ -1171,6 +1171,7 @@ AIReader = {
         : "需要抓取某个网页正文时可用 web_fetch。");
       const toolNote = "\n\n上面的论文正文可能是节选。你可以调用工具查阅更多内容：list_sections 看章节结构；read_section 读取某一章拿到每句 id；" +
         "list_figures 列出图表；view_figure 识读某张图/表的视觉内容；highlight 高亮某个句子 id（给 category 和一句话 reason）。" + webNote +
+        "涉及参考文献、相关工作或后续研究时，可用 lookup_paper 查某篇论文、find_references 看本文引用了哪些工作、related_papers 找相关/后续论文（query 留空即当前论文）。" +
         (deep
           ? "【深读模式】回答前请主动用 list_sections + read_section 读取所有相关章节，并对相关图/表 view_figure，确保基于充分证据作答。"
           : "当注入的正文不足以准确回答、或问题涉及具体数据/图表时，请主动调用 read_section / view_figure 查阅后再答；普通问题可直接作答。");
@@ -1494,6 +1495,21 @@ AIReader = {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const trimmed = line.trim();
+      // Fenced code block: ```[lang] … ``` — collect verbatim into a <pre> so the
+      // fence markers never leak as literal text (this fallback runs when the full
+      // Markdown renderer threw; without this, ``` lines show raw).
+      if (/^(```|~~~)/.test(trimmed)) {
+        ul = null;
+        const fence = trimmed.slice(0, 3);
+        const buf = [];
+        let j = i + 1;
+        for (; j < lines.length; j++) { if (lines[j].trim().startsWith(fence)) break; buf.push(lines[j]); }
+        const pre = this._el(doc, "pre", "aireader-md-pre");
+        pre.appendChild(this._el(doc, "code", "", buf.join("\n")));
+        bubble.appendChild(pre);
+        i = (j < lines.length) ? j : lines.length; // skip the closing fence (or to EOF if unterminated)
+        continue;
+      }
       // GFM table block: header row, delimiter row, then body rows.
       if (this._isTableRow(trimmed) && i + 1 < lines.length && this._isTableDelim(lines[i + 1].trim())) {
         ul = null;
@@ -1840,6 +1856,11 @@ AIReader = {
       T.push({ name: "web_search", description: "联网搜索（Google via Serper）。当论文之外的背景、最新进展、术语定义、相关工作需要外部信息时使用。返回标题、链接、摘要。", parameters: { type: "object", properties: { query: { type: "string", description: "搜索关键词" }, num: { type: "integer", description: "返回条数，默认 6，最多 10" } }, required: ["query"] } });
     }
     T.push({ name: "web_fetch", description: "抓取某个网页 URL 并返回其正文文本（已去除导航/脚本）。常配合 web_search 使用：先搜索拿到链接，再抓取需要细读的页面。", parameters: { type: "object", properties: { url: { type: "string", description: "http(s) 网址" } }, required: ["url"] } });
+    // Scholarly discovery (free APIs, no key needed): look up a paper, trace its
+    // references, and find related / follow-up work via the citation graph.
+    T.push({ name: "lookup_paper", description: "按标题/DOI/arXiv id/主题查一篇论文的元数据（标题、作者、年份、venue、被引数、摘要、链接）。query 留空=当前论文。用于确认某篇论文是什么、或找某主题的代表作。", parameters: { type: "object", properties: { query: { type: "string", description: "论文标题 / DOI / arXiv id / 主题关键词；留空=当前论文" } }, required: [] } });
+    T.push({ name: "find_references", description: "列出一篇论文引用了哪些工作（参考文献）。query 留空=当前论文。用于回答『这篇基于哪些工作』『某条引用的原文是什么』。", parameters: { type: "object", properties: { query: { type: "string", description: "论文标题/DOI/arXiv；留空=当前论文" } }, required: [] } });
+    T.push({ name: "related_papers", description: "找与某篇论文相关的工作，以及后续引用了它的新工作。query 留空=当前论文。用于『有哪些相关/后续研究』。", parameters: { type: "object", properties: { query: { type: "string", description: "论文标题/DOI/arXiv；留空=当前论文" } }, required: [] } });
     T.push({ name: "finish", description: "读完并标注完后调用，结束。", parameters: { type: "object", properties: { note: { type: "string" } }, required: [] } });
     return T;
   },
@@ -2124,7 +2145,7 @@ AIReader = {
   // parallel requests); side-effecting calls (highlight/finish) stay serial and
   // in order. Per-call failures become an error result, never crash the round.
   async _runToolCalls(state, c, calls) {
-    const RO = new Set(["list_sections", "read_section", "list_figures", "view_figure", "web_search", "web_fetch"]);
+    const RO = new Set(["list_sections", "read_section", "list_figures", "view_figure", "web_search", "web_fetch", "lookup_paper", "find_references", "related_papers"]);
     const limit = Math.max(1, parseInt(this.getPref("maxParallelTools"), 10) || 3);
     const slots = new Array(calls.length);
     const run1 = async (i) => {
@@ -2206,6 +2227,25 @@ AIReader = {
           render: { label: "抓取网页", brief: this._urlHost(url), outcome: "→ " + text.length + " 字", bodyText: (title ? title + "\n\n" : "") + text.slice(0, 2000) } };
       } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label: "抓取网页", brief: this._urlHost(url), outcome: "✕ 失败" } }; }
     }
+    if (name === "lookup_paper") {
+      const label = "查论文", brief = (args.query || "当前论文");
+      try { const r = await this.scholarLookup(state, args.query); const list = r.results || [];
+        return { output: JSON.stringify(list), render: { label, brief, outcome: "→ " + list.length + " 条", bodyText: this._fmtPaperList(list) } };
+      } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label, brief, outcome: "✕ 失败" } }; }
+    }
+    if (name === "find_references") {
+      const label = "找参考文献", brief = (args.query || "当前论文");
+      try { const list = await this.scholarReferences(state, args.query);
+        return { output: JSON.stringify(list), render: { label, brief, outcome: "→ " + list.length + " 条", bodyText: this._fmtPaperList(list) } };
+      } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label, brief, outcome: "✕ 失败" } }; }
+    }
+    if (name === "related_papers") {
+      const label = "相关论文", brief = (args.query || "当前论文");
+      try { const r = await this.scholarRelated(state, args.query);
+        const body = "【相关】\n" + this._fmtPaperList(r.related) + "\n\n【后续引用】\n" + this._fmtPaperList(r.citedBy);
+        return { output: JSON.stringify(r), render: { label, brief, outcome: "→ " + (r.related.length + r.citedBy.length) + " 条", bodyText: body } };
+      } catch (e) { return { output: JSON.stringify({ error: String(e.message || e) }), render: { label, brief, outcome: "✕ 失败" } }; }
+    }
     if (name === "finish") return { output: JSON.stringify({ ok: true }), render: { label: "完成", outcome: "✓" }, finish: true };
     return { output: JSON.stringify({ error: "unknown tool " + name }), render: { label: name, outcome: "✕ 未知工具" } };
   },
@@ -2257,6 +2297,100 @@ AIReader = {
     s = this._decodeEntities(s);
     s = s.replace(/[ \t ]+/g, " ").replace(/\n{3,}/g, "\n\n").replace(/^\s+|\s+$/gm, "").trim();
     return { title, text: s.slice(0, 16000) };
+  },
+
+  // ---- scholarly discovery (references + related work) via free APIs ----
+  // Semantic Scholar (keyless) for the citation graph; Google Scholar via the
+  // user's existing Serper key for keyword search. Results are kept small and
+  // errors are soft (S2's anonymous pool throttles under load) so the model can
+  // fall back instead of hard-failing.
+  _scholarCache(key) { if (!this._scholarStore) this._scholarStore = new Map(); if (!this._scholarStore.has(key)) this._scholarStore.set(key, {}); return this._scholarStore.get(key); },
+  _s2Fields: "title,authors,year,venue,citationCount,externalIds,url",
+  _currentPaperMeta(state) {
+    let it = state && state.item;
+    try { if (it && it.isAttachment && it.isAttachment() && it.parentItem) it = it.parentItem; } catch (e) {}
+    const get = (f) => { try { return (it && it.getField && it.getField(f)) || ""; } catch (e) { return ""; } };
+    const title = get("title");
+    const doi = (get("DOI") || "").trim();
+    const am = /arxiv[:/ ]?\s*(\d{4}\.\d{4,5})/i.exec((get("extra") || "") + " " + (get("url") || ""));
+    return { title, doi, arxiv: am ? am[1] : "" };
+  },
+  async _s2Get(path) {
+    const resp = await this._fetchLLM("https://api.semanticscholar.org" + path, { method: "GET", headers: { Accept: "application/json" } }, { timeoutMs: 20000, retries: 1 });
+    if (resp.status === 429 || resp.status === 503) throw new Error("Semantic Scholar 暂时限流，稍后再试");
+    if (!resp.ok) throw new Error("Semantic Scholar HTTP " + resp.status);
+    return this._parseOrThrow(await resp.text());
+  },
+  _normS2(p) {
+    if (!p) return null;
+    const ids = p.externalIds || {};
+    return { title: p.title || "(无标题)", authors: (p.authors || []).map((a) => a && a.name).filter(Boolean), year: p.year || null, venue: p.venue || "", citations: p.citationCount != null ? p.citationCount : null, doi: ids.DOI || "", arxiv: ids.ArXiv || "", url: (ids.ArXiv ? "https://arxiv.org/abs/" + ids.ArXiv : (p.url || (ids.DOI ? "https://doi.org/" + ids.DOI : ""))), abstract: p.abstract || "" };
+  },
+  // Turn a query/DOI/arXiv into an id the S2 graph endpoints accept (DOI:… /
+  // ARXIV:… pass straight through; a title is matched to its paperId).
+  async _s2ResolveId(q) {
+    q = (q || "").trim();
+    if (/^10\.\d{4,9}\//.test(q) || /doi\.org\//i.test(q)) return "DOI:" + q.replace(/^.*doi\.org\//i, "").trim();
+    const am = /(\d{4}\.\d{4,5})(v\d+)?$/.exec(q);
+    if (/arxiv/i.test(q) && am) return "ARXIV:" + am[1];
+    const j = await this._s2Get("/graph/v1/paper/search/match?query=" + encodeURIComponent(q) + "&fields=title");
+    const hit = j && j.data && j.data[0];
+    if (!hit || !hit.paperId) throw new Error("没有找到匹配的论文：" + q);
+    return hit.paperId;
+  },
+  async _paperIdFor(state, query) {
+    const q = (query || "").trim();
+    if (q) return await this._s2ResolveId(q);
+    const key = state && state.attachment && state.attachment.key;
+    const cache = key ? this._scholarCache(key) : {};
+    if (cache.id) return cache.id;
+    const meta = this._currentPaperMeta(state);
+    const seed = meta.doi || (meta.arxiv ? "arxiv:" + meta.arxiv : meta.title);
+    if (!seed) throw new Error("无法确定当前论文（缺少标题/DOI）");
+    const id = await this._s2ResolveId(seed);
+    if (key) cache.id = id;
+    return id;
+  },
+  async _scholarSearchSerper(query, num) {
+    const key = (this.getPref("serperKey") || "").trim();
+    if (!key) throw new Error("未配置 Serper Key");
+    const n = Math.max(1, Math.min(20, num || 10));
+    const resp = await this._fetchLLM("https://google.serper.dev/scholar", { method: "POST", headers: { "X-API-KEY": key, "Content-Type": "application/json" }, body: JSON.stringify({ q: query, num: n }) }, { timeoutMs: 20000, retries: 1 });
+    if (!resp.ok) throw new Error("Serper HTTP " + resp.status);
+    const data = this._parseOrThrow(await resp.text());
+    return (data.organic || []).map((r) => ({ title: r.title || "", url: r.link || "", year: r.year || null, citations: r.citedBy != null ? r.citedBy : null, pdf: r.pdfUrl || "", info: r.publicationInfo || "", abstract: r.snippet || "", authors: [] }));
+  },
+  async scholarLookup(state, query) {
+    const q = (query || "").trim() || this._currentPaperMeta(state).title;
+    if (!q) throw new Error("没有可查的论文（请给标题/DOI/arXiv，或先选中一篇论文）");
+    const hasKey = !!(this.getPref("serperKey") || "").trim();
+    const isId = /^10\.\d{4,9}\//.test(q) || /arxiv/i.test(q);
+    if (hasKey && !isId) return { source: "scholar", results: await this._scholarSearchSerper(q, 8) };
+    const j = await this._s2Get("/graph/v1/paper/search?query=" + encodeURIComponent(q) + "&limit=8&fields=" + this._s2Fields + ",abstract");
+    return { source: "s2", results: (j.data || []).map((p) => this._normS2(p)).filter(Boolean) };
+  },
+  async scholarReferences(state, query) {
+    const id = await this._paperIdFor(state, query);
+    const j = await this._s2Get("/graph/v1/paper/" + encodeURIComponent(id) + "/references?limit=25&fields=" + this._s2Fields);
+    return (j.data || []).map((d) => this._normS2(d.citedPaper)).filter(Boolean);
+  },
+  async scholarRelated(state, query) {
+    const id = await this._paperIdFor(state, query);
+    let related = [], citedBy = [];
+    try { const r = await this._s2Get("/recommendations/v1/papers/forpaper/" + encodeURIComponent(id) + "?limit=12&fields=" + this._s2Fields); related = (r.recommendedPapers || []).map((p) => this._normS2(p)).filter(Boolean); } catch (e) { this.log("related recs: " + e); }
+    try { const c = await this._s2Get("/graph/v1/paper/" + encodeURIComponent(id) + "/citations?limit=15&fields=" + this._s2Fields); citedBy = (c.data || []).map((d) => this._normS2(d.citingPaper)).filter(Boolean); } catch (e) { this.log("related cites: " + e); }
+    if (!related.length && !citedBy.length) throw new Error("没有找到相关/后续论文");
+    return { related, citedBy };
+  },
+  _fmtPaperList(list) {
+    if (!list || !list.length) return "（无结果）";
+    return list.slice(0, 15).map((p, i) => {
+      const au = (p.authors || []).slice(0, 3).join(", ") + ((p.authors || []).length > 3 ? " 等" : "");
+      const meta = [au, p.year, p.venue, p.info].filter(Boolean).join(" · ");
+      const cite = p.citations != null ? "  被引 " + p.citations : "";
+      const link = p.url || p.pdf || (p.doi ? "https://doi.org/" + p.doi : "");
+      return (i + 1) + ". " + (p.title || "") + (meta ? "\n   " + meta : "") + cite + (link ? "\n   " + link : "");
+    }).join("\n");
   },
 
   // A tool-calling agent: the model LISTS the paper's sections, READS the ones

@@ -42,6 +42,7 @@ Two things set it apart from a plain chat box:
 | **Reading skills** | Pick a mode in the header — 精读理解 (default), 同行评审, 三遍速读, 领域综述, 可复现复刻, 批判红队, 导师讲解, 速览. Each swaps the quick-action chips and injects its method. |
 | **Figure vision** | Render a figure or table region to an image for a multimodal model, instead of reading the caption text alone. |
 | **Web search & fetch** | `web_search` (Google via Serper, needs a key) and `web_fetch` (read a page as text) for background beyond the paper. |
+| **Scholarly discovery** | Trace a paper's **references**, find **related & follow-up** work, and look up any paper by title/DOI/arXiv — via the free Semantic Scholar graph. With a Serper key, keyword lookup upgrades to Google Scholar (with citation counts). |
 | **Inline diagrams** | The model draws with a ` ```svg ` block, rendered inline (sanitized, scaled to the panel). Source is hidden while it streams. |
 | **Continuous context** | The conversation is one running history — earlier reads stay visible, so the model doesn't re-read; it auto-compacts when long. |
 | **Selection popup** | Select text in the reader to quote it, explain it (streaming, with copy and "write to annotation"), or translate it. |
