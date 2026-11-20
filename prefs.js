@@ -10,3 +10,4 @@ pref("extensions.zotero.aireader.serperKey", "");
 pref("extensions.zotero.aireader.customPrompt", "");
 pref("extensions.zotero.aireader.skill", "deep-read");
 pref("extensions.zotero.aireader.maxParallelTools", 3);
+pref("extensions.zotero.aireader.syncChats", true);

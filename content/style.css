@@ -56,6 +56,36 @@
 .aireader-deep-on { border-color: var(--accent-green, #3fae5a); color: #fff; background: var(--accent-green, #3fae5a); }
 .aireader-deep-on:hover { border-color: var(--accent-green, #3fae5a); color: #fff; }
 
+/* top bar holding the settings gear (right-aligned, at the very top) */
+.aireader-topbar { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; margin: 0 0 2px; }
+
+/* share-material generator button */
+.aireader-sharebtn { font-size: 11px; }
+.aireader-share-checklist { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.aireader-share-step { color: var(--fill-secondary, #6b7280); }
+.aireader-share-step-cur { color: var(--air-accent); font-weight: 600; }
+.aireader-share-step-cur::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: aireader-spin 0.7s linear infinite; }
+.aireader-share-step-done { color: inherit; }
+@keyframes aireader-spin { to { transform: rotate(360deg); } }
+
+/* multi-paper comparison: add-to-basket + cross-paper toggle */
+.aireader-cmpbtn { font-size: 11px; }
+.aireader-cmpbtn-on { border-color: var(--air-accent); color: #fff; background: var(--air-accent); }
+.aireader-cmpbtn-on:hover { border-color: var(--air-accent); color: #fff; }
+.aireader-multibtn { font-size: 11px; }
+.aireader-multibtn-on { border-color: var(--air-accent); color: #fff; background: var(--air-accent); }
+.aireader-multibtn-on:hover { border-color: var(--air-accent); color: #fff; }
+
+/* comparison basket bar (above the chips) */
+.aireader-basketbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; min-width: 0; margin: 2px 0; }
+.aireader-basket-label { font-size: 11px; color: var(--air-accent); font-weight: 600; }
+.aireader-basket-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; font-size: 11px; padding: 2px 4px 2px 9px; border-radius: 999px; border: 1px solid var(--air-border); background: var(--air-bubble, rgba(127,127,127,0.1)); }
+.aireader-basket-chip-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.aireader-basket-x { flex: 0 0 auto; cursor: pointer; opacity: .6; padding: 0 3px; }
+.aireader-basket-x:hover { opacity: 1; color: var(--accent-red, #e5534b); }
+.aireader-basket-clear { font-size: 11px; color: var(--fill-secondary, inherit); cursor: pointer; opacity: .8; }
+.aireader-basket-clear:hover { opacity: 1; color: var(--accent-red, #e5534b); }
+
 /* ---- agentic read & annotate: live progress log + summary ---- */
 .aireader-agentlog { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 6px; }
 .aireader-agentlog-line {

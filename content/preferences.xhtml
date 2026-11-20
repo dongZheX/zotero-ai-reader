@@ -79,6 +79,12 @@
                   placeholder="serper.dev — required for web_search"/>
     </hbox>
 
+    <hbox align="center">
+      <checkbox id="aireader-syncchats" native="true"
+                preference="extensions.zotero.aireader.syncChats"
+                label="同步对话记录 Sync chats（额外写入一条会随 Zotero 同步的笔记，多机恢复）"/>
+    </hbox>
+
     <vbox>
       <label class="aireader-pref-label" data-l10n-id="aireader-prefs-customprompt" control="aireader-customprompt">自定义指令 Custom instructions（追加到系统提示，可留空）</label>
       <html:textarea id="aireader-customprompt" rows="5" style="flex:1; width:100%; font-family:-moz-fixed; resize:vertical;"

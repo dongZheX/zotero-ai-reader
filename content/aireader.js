@@ -253,6 +253,7 @@ AIReader = {
     if (old) {
       this.closeModelMenu(old);
       this.closeSkillMenu(old);
+      this.closeShareMenu(old);
       if (old._ro) { try { old._ro.disconnect(); } catch (e) {} old._ro = null; }
       if (old._onWinResize) { try { old.doc.defaultView.removeEventListener("resize", old._onWinResize); } catch (e) {} old._onWinResize = null; }
     }
@@ -281,23 +282,47 @@ AIReader = {
     const noteBtn = this._el(doc, "div", "aireader-top-btn", "存为笔记");
     noteBtn.title = "把当前对话存为 Zotero 笔记";
     noteBtn.addEventListener("click", () => this.saveNote(body));
+    // one-click "share material" generator (one-pager / slides / HTML page)
+    const shareBtn = this._el(doc, "div", "aireader-top-btn aireader-sharebtn", "📄 分享 ▾");
+    shareBtn.title = "把这篇论文一键生成可分享的材料（一页总结 / 幻灯片 / HTML）";
+    shareBtn.addEventListener("click", (ev) => { ev.stopPropagation(); this.toggleShareMenu(body); });
+    // Multi-paper comparison: ➕ adds the current paper to a session "basket";
+    // 跨论文 toggles multi-paper mode (questions answered across the basket).
+    const cmpBtn = this._el(doc, "div", "aireader-top-btn aireader-cmpbtn", "➕ 对比");
+    cmpBtn.title = "把当前论文加入对比篮子（跨论文提问用）";
+    cmpBtn.addEventListener("click", () => { const st = this._bodyState.get(body); if (st) this._basketToggle(st); });
+    const multiBtn = this._el(doc, "div", "aireader-top-btn aireader-multibtn", "跨论文 关");
+    multiBtn.title = "开启后，提问会跨对比篮子里的多篇论文综合/对比作答";
+    multiBtn.addEventListener("click", () => { const st = this._bodyState.get(body); if (st) this._toggleMulti(st); });
     const gear = this._el(doc, "div", "aireader-gear", "⚙ 设置");
     gear.title = "打开 AI Reader 设置";
     gear.addEventListener("click", () => Zotero.Utilities.Internal.openPreferences(AIReader._prefPaneID));
     top.appendChild(agentBtn);
     top.appendChild(skillBtn);
     top.appendChild(deepBtn);
+    top.appendChild(cmpBtn);
+    top.appendChild(multiBtn);
     top.appendChild(noteBtn);
-    top.appendChild(this._el(doc, "div", "aireader-foot-spacer"));
-    top.appendChild(gear);
+    top.appendChild(shareBtn);
     // (the button row is appended just above the composer below, not at the top,
     //  so the input area is the visual focus)
+
+    // Gear sits in a thin bar at the very TOP of the panel (right-aligned, next
+    // to Zotero's section collapse control) so 设置 is always reachable up top.
+    const topbar = this._el(doc, "div", "aireader-topbar");
+    topbar.appendChild(this._el(doc, "div", "aireader-foot-spacer"));
+    topbar.appendChild(gear);
+    body.appendChild(topbar);
 
     const status = this._el(doc, "div", "aireader-status");
     body.appendChild(status);
 
     const chatMsgs = this._el(doc, "div", "aireader-chat-msgs");
     body.appendChild(chatMsgs);
+
+    const basketBar = this._el(doc, "div", "aireader-basketbar"); // comparison set, filled by _renderBasket
+    basketBar.style.display = "none";
+    body.appendChild(basketBar);
 
     const chips = this._el(doc, "div", "aireader-chips"); // filled by renderChips(state) below
     body.appendChild(chips);
@@ -343,7 +368,8 @@ AIReader = {
     const state = {
       item, attachment: null, blocks: null, doc, body,
       status, chatMsgs, input, send, modelPill, skillBtn, chips, composer, footer, preview,
-      modelMenu: null, modelList: null, skillMenu: null, _onDoc: null, _onSkillDoc: null, streaming: false, cancel: false,
+      cmpBtn, multiBtn, basketBar, basket: [], multiMode: false, shareBtn,
+      modelMenu: null, modelList: null, skillMenu: null, shareMenu: null, _onDoc: null, _onSkillDoc: null, _onShareDoc: null, streaming: false, cancel: false,
     };
     this._bodyState.set(body, state);
     this.updateModelPill(state);
@@ -469,6 +495,41 @@ AIReader = {
   closeSkillMenu(state) {
     if (state._onSkillDoc) { try { state.doc.removeEventListener("click", state._onSkillDoc); } catch (e) {} state._onSkillDoc = null; }
     if (state.skillMenu) { state.skillMenu.remove(); state.skillMenu = null; }
+  },
+
+  // ---- share-material menu (一页总结 / 幻灯片 / HTML) ----
+  toggleShareMenu(body) {
+    const state = this._bodyState.get(body);
+    if (!state) return;
+    if (state.shareMenu) { this.closeShareMenu(state); return; }
+    this.closeModelMenu(state); this.closeSkillMenu(state);
+    const doc = state.doc;
+    const C = this._menuColors(doc);
+    const menu = this._el(doc, "div", "aireader-skillmenu aireader-sharemenu");
+    menu.style.cssText += ";background:" + C.bg + ";color:" + C.fg + ";border:1px solid " + C.border + ";font-family:" + this._UIFONT + ";";
+    for (const f of this._shareFormats()) {
+      const it = this._el(doc, "div", "aireader-skillitem");
+      const t = this._el(doc, "div", "aireader-skillitem-t", f.label);
+      const d = this._el(doc, "div", "aireader-skillitem-d", f.desc || "");
+      it.appendChild(t); it.appendChild(d);
+      it.style.cssText += ";padding:6px 10px;cursor:pointer;color:" + C.fg + ";font-family:" + this._UIFONT + ";";
+      d.style.cssText += ";color:" + C.muted + ";font-size:11px;font-weight:400;";
+      it.addEventListener("mouseenter", () => { it.style.background = C.hover; });
+      it.addEventListener("mouseleave", () => { it.style.background = "transparent"; });
+      it.addEventListener("click", (ev) => { ev.stopPropagation(); this.closeShareMenu(state); this.generateShare(state, f.id); });
+      menu.appendChild(it);
+    }
+    state.shareMenu = menu;
+    body.appendChild(menu);
+    this._positionMenu(state, menu, state.shareBtn);
+    const onDoc = (ev) => { if (state.shareMenu && !state.shareMenu.contains(ev.target) && ev.target !== state.shareBtn) this.closeShareMenu(state); };
+    state._onShareDoc = onDoc;
+    setTimeout(() => doc.addEventListener("click", onDoc), 0);
+  },
+  closeShareMenu(state) {
+    if (!state) return;
+    if (state._onShareDoc) { try { state.doc.removeEventListener("click", state._onShareDoc); } catch (e) {} state._onShareDoc = null; }
+    if (state.shareMenu) { state.shareMenu.remove(); state.shareMenu = null; }
   },
 
   updateModelPill(state) {
@@ -609,6 +670,7 @@ AIReader = {
       let hist = this._chatStore.get(att.key);
       if (!hist) { hist = (await this.loadChat(att)) || []; this._chatStore.set(att.key, hist); }
       this.renderChatHistory(state, hist);
+      this._updateCmpBtn(state); this._renderBasket(state); // reflect comparison-basket state for this paper
       this.setStatus(state, "", "muted");
     } catch (e) { this.log("hydrate error: " + e); this.setStatus(state, this._friendlyError(e), "error"); }
   },
@@ -1129,7 +1191,10 @@ AIReader = {
     const q = forcedText != null ? forcedText : (state.input.value || "").trim();
     if (!q) return;
     if (forcedText == null) state.input.value = "";
-    return this._send(state, q, opts || { broad: false });
+    opts = opts || { broad: false };
+    // 跨论文 mode (toggle on + at least 2 papers once the current one is folded in).
+    if (state.multiMode && this._basketList(state).length >= 2) opts = Object.assign({}, opts, { multi: true });
+    return this._send(state, q, opts);
   },
 
   async _send(state, text, opts) {
@@ -1148,34 +1213,45 @@ AIReader = {
     const meta = {};
     try {
       await this.ensureBlocks(state);
-      let ctx = opts.broad ? this.buildContextBounded(state.blocks) : this.buildRetrievedContext(state.blocks, text);
-      if (opts.annos) {
-        const ua = await this.getUserAnnotations(state.attachment);
-        if (ua.length) ctx = "【用户在 PDF 中的高亮与批注】（按出现顺序，优先结合这些回答）：\n" + ua.join("\n") + "\n\n——\n\n论文正文：\n" + ctx;
-        else this.setStatus(state, "这篇论文还没有你的高亮/批注。", "muted");
-      }
-      if (opts.withFigures) {
-        this.setStatus(state, "正在识读图表…", "busy");
-        try { const fd = await this._figureDigest(state, 2); if (fd) ctx = fd + "——\n\n论文正文：\n" + ctx; } catch (e) { this.log("withFigures: " + e); }
-      }
-      meta.ctxChars = ctx.length;
-      this.setStatus(state, "生成中…", "busy");
       // Fold older turns into a rolling summary so long chats don't lose their
       // early context when we slice to the most recent turns.
       await this._compactHistory(key, hist);
       const sumNote = this._histSummary.get(key);
       const deep = !!this._deepRead;
-      const hasSerper = !!(this.getPref("serperKey") || "").trim();
-      const webNote = (hasSerper
-        ? "需要论文之外的背景、最新进展、术语或相关工作时，可用 web_search 联网搜索、web_fetch 抓取网页正文。"
-        : "需要抓取某个网页正文时可用 web_fetch。");
-      const toolNote = "\n\n上面的论文正文可能是节选。你可以调用工具查阅更多内容：list_sections 看章节结构；read_section 读取某一章拿到每句 id；" +
-        "list_figures 列出图表；view_figure 识读某张图/表的视觉内容；highlight 高亮某个句子 id（给 category 和一句话 reason）。" + webNote +
-        "涉及参考文献、相关工作或后续研究时，可用 lookup_paper 查某篇论文、find_references 看本文引用了哪些工作、related_papers 找相关/后续论文（query 留空即当前论文）。" +
-        (deep
-          ? "【深读模式】回答前请主动用 list_sections + read_section 读取所有相关章节，并对相关图/表 view_figure，确保基于充分证据作答。"
-          : "当注入的正文不足以准确回答、或问题涉及具体数据/图表时，请主动调用 read_section / view_figure 查阅后再答；普通问题可直接作答。");
-      const sys = this.systemPrompt(ctx) + toolNote + this._skillDirective() + (sumNote ? "\n\n【早期对话要点】\n" + sumNote : "");
+      let sys;
+      if (opts.multi) {
+        // Multi-paper mode: assemble retrieved excerpts from every paper in the
+        // comparison basket. No single-paper agent tools (section/figure/highlight
+        // are per-document); citations are textual (论文i · p页), not [B id] badges.
+        this.setStatus(state, "正在整理多篇论文…", "busy");
+        const mctx = await this._buildMultiContext(state, text);
+        meta.ctxChars = mctx.length;
+        sys = this._multiSystemPrompt(mctx, this._basketList(state).length) + this._skillDirective() + (sumNote ? "\n\n【早期对话要点】\n" + sumNote : "");
+      } else {
+        let ctx = opts.broad ? this.buildContextBounded(state.blocks) : this.buildRetrievedContext(state.blocks, text);
+        if (opts.annos) {
+          const ua = await this.getUserAnnotations(state.attachment);
+          if (ua.length) ctx = "【用户在 PDF 中的高亮与批注】（按出现顺序，优先结合这些回答）：\n" + ua.join("\n") + "\n\n——\n\n论文正文：\n" + ctx;
+          else this.setStatus(state, "这篇论文还没有你的高亮/批注。", "muted");
+        }
+        if (opts.withFigures) {
+          this.setStatus(state, "正在识读图表…", "busy");
+          try { const fd = await this._figureDigest(state, 2); if (fd) ctx = fd + "——\n\n论文正文：\n" + ctx; } catch (e) { this.log("withFigures: " + e); }
+        }
+        meta.ctxChars = ctx.length;
+        const hasSerper = !!(this.getPref("serperKey") || "").trim();
+        const webNote = (hasSerper
+          ? "需要论文之外的背景、最新进展、术语或相关工作时，可用 web_search 联网搜索、web_fetch 抓取网页正文。"
+          : "需要抓取某个网页正文时可用 web_fetch。");
+        const toolNote = "\n\n上面的论文正文可能是节选。你可以调用工具查阅更多内容：list_sections 看章节结构；read_section 读取某一章拿到每句 id；" +
+          "list_figures 列出图表；view_figure 识读某张图/表的视觉内容；highlight 高亮某个句子 id（给 category 和一句话 reason）。" + webNote +
+          "涉及参考文献、相关工作或后续研究时，可用 lookup_paper 查某篇论文、find_references 看本文引用了哪些工作、related_papers 找相关/后续论文（query 留空即当前论文）。" +
+          (deep
+            ? "【深读模式】回答前请主动用 list_sections + read_section 读取所有相关章节，并对相关图/表 view_figure，确保基于充分证据作答。"
+            : "当注入的正文不足以准确回答、或问题涉及具体数据/图表时，请主动调用 read_section / view_figure 查阅后再答；普通问题可直接作答。");
+        sys = this.systemPrompt(ctx) + toolNote + this._skillDirective() + (sumNote ? "\n\n【早期对话要点】\n" + sumNote : "");
+      }
+      this.setStatus(state, "生成中…", "busy");
       // Continuous agentic context: one live message history (incl. tool turns)
       // persists across questions; compact it when it grows too large. The read
       // tool results already live in `convo`, so we no longer inject _priorContext.
@@ -1190,7 +1266,7 @@ AIReader = {
       // them (shown as collapsible tool blocks) and continue — so tool use is a
       // general capability of normal chat, not just the "通读并标注" button.
       const fmt0 = this._fmt();
-      const tools = this._toolSchemas(fmt0);
+      const tools = opts.multi ? null : this._toolSchemas(fmt0); // multi-paper mode: context is pre-assembled, no single-paper tools
       const tc = { sections: this._buildSections(state.blocks), byId: new Map((state.blocks || []).map((b) => [b.id, b])), run: { keys: [], applied: [] }, tally: {}, reads: 0 };
       const toolLog = this._el(state.doc, "div", "aireader-toollog"); let toolLogAdded = false; const grp = {};
       const ensureToolLog = () => { if (!toolLogAdded) { bubble.appendChild(toolLog); toolLogAdded = true; } };
@@ -2393,6 +2469,121 @@ AIReader = {
     }).join("\n");
   },
 
+  // ---------------------------------------------------------- 多篇对比（对比篮子）
+  // Session-only "basket" of papers to ask across. The currently-open paper is
+  // always folded in (so you add the OTHER papers, not the one you're reading).
+  _basketList(state) {
+    const list = (state.basket || []).slice();
+    const curKey = state.attachment && state.attachment.key;
+    if (curKey && !list.some((p) => p.key === curKey)) {
+      const meta = this._currentPaperMeta(state);
+      list.unshift({ key: curKey, id: state.attachment.id, libraryID: state.attachment.libraryID, title: meta.title || "当前论文" });
+    }
+    return list;
+  },
+  _basketToggle(state) {
+    if (!state.attachment) return;
+    const key = state.attachment.key;
+    const i = (state.basket || []).findIndex((p) => p.key === key);
+    if (i >= 0) state.basket.splice(i, 1);
+    else {
+      const meta = this._currentPaperMeta(state);
+      state.basket.push({ key, id: state.attachment.id, libraryID: state.attachment.libraryID, title: meta.title || "未命名论文" });
+    }
+    this._renderBasket(state);
+    this._updateCmpBtn(state);
+  },
+  _updateCmpBtn(state) {
+    if (!state.cmpBtn) return;
+    const inB = state.attachment && (state.basket || []).some((p) => p.key === state.attachment.key);
+    state.cmpBtn.textContent = inB ? "✓ 已加入" : "➕ 对比";
+    state.cmpBtn.classList.toggle("aireader-cmpbtn-on", !!inB);
+  },
+  _toggleMulti(state) {
+    state.multiMode = !state.multiMode;
+    if (state.multiBtn) {
+      state.multiBtn.textContent = "跨论文 " + (state.multiMode ? "开" : "关");
+      state.multiBtn.classList.toggle("aireader-multibtn-on", state.multiMode);
+    }
+    const n = this._basketList(state).length;
+    if (state.multiMode && n < 2) this.setStatus(state, "跨论文已开：用 ➕ 对比 把要对比的论文加入篮子（至少 2 篇）。", "muted");
+    else if (state.multiMode) this.setStatus(state, "跨论文已开：提问将综合 " + n + " 篇论文。", "muted");
+    else this.setStatus(state, "跨论文已关。", "muted");
+    this._renderBasket(state);
+  },
+  _renderBasket(state) {
+    const bar = state.basketBar; if (!bar) return;
+    const doc = state.doc;
+    bar.textContent = "";
+    if (!(state.basket && state.basket.length)) { bar.style.display = "none"; return; }
+    bar.style.display = "";
+    bar.appendChild(this._el(doc, "span", "aireader-basket-label", "对比(" + state.basket.length + ")" + (state.multiMode ? " · 跨论文已开" : "")));
+    state.basket.forEach((p) => {
+      const chip = this._el(doc, "span", "aireader-basket-chip");
+      chip.appendChild(this._el(doc, "span", "aireader-basket-chip-t", (p.title || "未命名").slice(0, 32)));
+      const x = this._el(doc, "span", "aireader-basket-x", "✕");
+      x.title = "移除";
+      x.addEventListener("click", () => {
+        const i = state.basket.findIndex((q) => q.key === p.key);
+        if (i >= 0) state.basket.splice(i, 1);
+        this._renderBasket(state); this._updateCmpBtn(state);
+      });
+      chip.appendChild(x);
+      bar.appendChild(chip);
+    });
+    const clear = this._el(doc, "span", "aireader-basket-clear", "清空对比");
+    clear.addEventListener("click", () => { state.basket = []; this._renderBasket(state); this._updateCmpBtn(state); });
+    bar.appendChild(clear);
+  },
+  // Blocks for any basket paper: current paper uses live blocks, others come
+  // from the in-memory store, then disk cache, then a fresh extraction (cached).
+  async _basketBlocks(state, p) {
+    if (state.attachment && p.key === state.attachment.key && state.blocks && state.blocks.length) return state.blocks;
+    let blocks = this._blockStore.get(p.key);
+    if (blocks && blocks.length) return blocks;
+    try {
+      const att = Zotero.Items.get(p.id);
+      if (att) { const disk = await this.loadCache(att); if (disk && disk.blocks && disk.blocks.length) blocks = disk.blocks; }
+    } catch (e) {}
+    if (!(blocks && blocks.length)) { try { blocks = await this.extractBlocks(p.id); } catch (e) { this.log("basket extract " + p.key + ": " + e); } }
+    if (blocks && blocks.length) this._blockStore.set(p.key, blocks);
+    return blocks || [];
+  },
+  // Assemble a labelled multi-document context: for each basket paper, the most
+  // query-relevant excerpt (budget = maxChars/N). Block ids collide across
+  // papers, so strip the [B<id> …] prefix and keep only the page → textual cites.
+  async _buildMultiContext(state, query) {
+    const list = this._basketList(state);
+    const N = list.length || 1;
+    const maxChars = Number(this.getPref("maxChars")) || 60000;
+    const per = Math.max(2000, Math.floor(maxChars / N) - 200);
+    const parts = [];
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      const blocks = await this._basketBlocks(state, p);
+      let body;
+      if (!blocks.length) body = "（无法提取正文）";
+      else {
+        let ex = this.buildRetrievedContext(blocks, query);
+        ex = ex.replace(/\[B\d+\s+(p[^\]]*)\]/g, "($1)"); // drop colliding ids, keep page
+        if (ex.length > per) ex = ex.slice(0, per) + "\n…（略）";
+        body = ex;
+      }
+      parts.push("【论文 " + (i + 1) + " · " + (p.title || "未命名") + "】\n" + body);
+    }
+    return parts.join("\n\n———\n\n");
+  },
+  _multiSystemPrompt(ctx, n) {
+    const lang = this.getPref("language") || "中文";
+    return "你是学术论文对比阅读助手，用" + lang + "回答。下面给出了 " + n + " 篇论文各自的相关片段（按『【论文 i · 标题】』分节，片段中的 (p页码) 为页码）。要求：\n" +
+      "1) 基于这些片段对比/综合作答，明确区分每篇的观点与贡献，不要混淆来源。\n" +
+      "2) 引用某篇时写（论文i · p页），不要用 [B<id>] 这类单篇徽标。\n" +
+      "3) 片段可能是节选；信息不足以回答时如实说明，不要臆造。\n" +
+      "4) 适合时用表格并列对比各篇的方法/数据/结论。\n\n" +
+      this._styleGuide() + this._customPrompt() +
+      "各篇论文相关片段：\n\n" + ctx;
+  },
+
   // A tool-calling agent: the model LISTS the paper's sections, READS the ones
   // it chooses, and HIGHLIGHTs specific sentences — via native function-calling.
   // The tool-interaction process is shown live in the bubble.
@@ -2677,6 +2868,281 @@ AIReader = {
     inner += this._answerToHTML(state, text);
     inner += this._noteFooter();
     await this._appendOrCreateNote(state, inner);
+  },
+
+  // ---------------------------------------------- 分享材料（share generator）
+  // Mirrors obsidian src/share.ts. The recipe (prompts + HTML template) is
+  // distilled from the tech-html-explainer idea, run through our own pipeline.
+  _shareStyleNote() {
+    return "语言：中文为主，专有名词/模型名/指标名/英文缩写保留原文（如 LoRA、RLHF、in-context）。" +
+      "审美上避免 AI 套路：不空话套话、不堆排比、不用装饰性加粗、不滥用 emoji、不要升华式结尾。";
+  },
+  _shareFormats() {
+    const S = this._shareStyleNote();
+    return [
+      { id: "onepager", label: "一页总结", desc: "结构化 Markdown，适合存笔记", ext: "md", buildSystemPrompt: (lang) =>
+        "你是论文分享助手，用" + lang + "把这篇论文浓缩成一页可分享的总结（Markdown）。按以下结构，每节具体、给数字、别空泛：\n" +
+        "# 标题\n**一句话 TL;DR**（这篇到底做了什么、结论是什么）\n" +
+        "## 背景与问题（它针对什么痛点）\n## 核心贡献（分条，每条一句话说清“新在哪”）\n" +
+        "## 方法（关键设计与直觉，必要时给维度/公式）\n## 关键结果（引用具体数字与对比；相关图表用 [[fig:<id>]] 指出）\n" +
+        "## 局限与开放问题\n## 一句话评价（值不值得读、适合谁）\n" +
+        "要求：基于论文，关键论断后用 [B<id>] 标注依据；不臆造。" + S },
+      { id: "html", label: "HTML 分享页", desc: "图文并茂单文件网页，嵌入本文图表", ext: "html", buildSystemPrompt: (lang) =>
+        "你是论文分享助手，用" + lang + "把这篇论文做成一页**图文并茂、可直接分享**的技术讲解网页。只输出 <body> 内部的 HTML 片段（不要写 <html>/<head>/<body>/<style>，外层样式与配色已备好，请直接使用下列 class）。\n\n" +
+        "【必备结构，按顺序】\n" +
+        "1. <header>：论文标题 + 一句话副标题（TL;DR）+ 若干 <span class=\"tag\">关键词</span>。\n" +
+        "2. <div class=\"toc\"><ul><li><a href=\"#s1\">…</a></li>…</ul></div>：目录，锚点对应各章节。\n" +
+        "3. 每章一个 <section id=\"s1\">，<h2> 带序号标题；正文用 <h3>、<p>、<ul>。章节建议：背景与问题 / 核心方法 / 关键结果 / 对比与讨论 / 局限 / 速问速答。\n\n" +
+        "【组件（直接用这些 class，样式已定义）】\n" +
+        "- 方法/流程示意：优先输出 ```svg 手绘图（根 <svg> 带 viewBox、不要固定像素宽高，框线+箭头+文字标注），放进 <div class=\"svg-wrap\">…<div class=\"caption\">图N·说明</div></div>。\n" +
+        "- 展示论文自己的图表：用 [[fig:<id>]] 占位（<id> 为正文里的图/表块号），会被自动替换成真实图片（已包好卡片），请在确有相关图表时使用，优先放关键结果图。\n" +
+        "- 维度/数据流推演：<div class=\"dim\">[B, N, d] → …</div>。\n" +
+        "- 优缺点：<div class=\"pros-cons\"><div class=\"pros\"><h4>优点</h4><ul>…</ul></div><div class=\"cons\"><h4>局限</h4><ul>…</ul></div></div>。\n" +
+        "- 横向对比：<table>（有多个方法/设置时用，带表头）。\n" +
+        "- 关键术语：<span class=\"highlight\">…</span>。\n" +
+        "- 速问速答（放最后一章，≥5 条，覆盖 why/how/trade-off）：<div class=\"qa\"><div class=\"q\">问题</div><div class=\"a\">回答（带具体数字/方法）</div></div>。\n\n" +
+        "【质量要求】结果要引用论文里的具体数字；关键论断后可用 [B<id>]；不臆造、图表不编造；" + S },
+    ];
+  },
+  // [[fig:id]] → figure card; resolver failure drops the placeholder.
+  async _embedFigures(text, resolver) {
+    const re = /\[\[fig:B?(\d+)\]\]/g;
+    const ids = []; let m;
+    while ((m = re.exec(text || ""))) ids.push(parseInt(m[1], 10));
+    const uriById = new Map();
+    for (const id of ids) {
+      if (uriById.has(id)) continue;
+      try { const u = await resolver(id); if (u) uriById.set(id, u); } catch (e) {}
+    }
+    return (text || "").replace(re, (_w, g1) => {
+      const uri = uriById.get(parseInt(g1, 10));
+      return uri ? '<div class="paper-fig"><img src="' + uri + '" alt="figure ' + g1 + '"/><div class="caption">本文图表 ' + g1 + '</div></div>' : "";
+    });
+  },
+  _svgFencesToInline(html) { return (html || "").replace(/```svg\s*([\s\S]*?)```/gi, (_w, body) => String(body).trim()); },
+  _wrapHtmlDoc(title, bodyHtml) {
+    const safe = (title || "论文分享").replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
+    return "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"UTF-8\"/>\n" +
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>\n" +
+      "<title>" + safe + "</title>\n<style>\n" + this._SHARE_CSS + "\n</style>\n</head>\n<body>\n" +
+      "<div class=\"container\">\n" + (bodyHtml || "") + "\n</div>\n</body>\n</html>\n";
+  },
+  // Ported from ~/.claude/skills/tech-html-explainer/assets/base.css.
+  _SHARE_CSS: [
+    "*{box-sizing:border-box;margin:0;padding:0;}",
+    "body{font-family:-apple-system,BlinkMacSystemFont,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;line-height:1.75;color:#2c3e50;background:linear-gradient(135deg,#f5f7fa 0%,#e8ecf3 100%);padding:24px;min-height:100vh;}",
+    ".container{max-width:1180px;margin:0 auto;}",
+    "header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:50px 40px;border-radius:18px;box-shadow:0 12px 40px rgba(102,126,234,.35);margin-bottom:28px;text-align:center;}",
+    "header h1{font-size:2.2em;margin-bottom:12px;letter-spacing:.5px;} header p{font-size:1.06em;opacity:.95;}",
+    ".tag{display:inline-block;background:rgba(255,255,255,.22);padding:4px 12px;border-radius:20px;margin:6px 5px 0;font-size:.86em;}",
+    "section{background:#fff;padding:34px 40px;border-radius:14px;box-shadow:0 4px 22px rgba(0,0,0,.06);margin-bottom:24px;}",
+    "h2{font-size:1.7em;color:#2c3e50;border-left:5px solid #667eea;padding-left:16px;margin-bottom:20px;}",
+    "h3{font-size:1.28em;color:#34495e;margin:22px 0 12px;} h3::before{content:'▸ ';color:#667eea;} h4{color:#667eea;margin:16px 0 8px;font-size:1.06em;}",
+    "p{margin-bottom:12px;} ul,ol{padding-left:22px;margin-bottom:12px;} li{margin:5px 0;}",
+    "code{background:#f4f6fa;color:#d63384;padding:2px 7px;border-radius:4px;font-family:'SF Mono',Consolas,monospace;font-size:.92em;}",
+    "table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.95em;} th,td{padding:10px 14px;text-align:left;border-bottom:1px solid #e3e8f0;} th{background:#f4f6fa;font-weight:600;} tr:hover td{background:#fafbfd;}",
+    ".pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;} .pros,.cons{padding:18px 22px;border-radius:10px;} .pros{background:#e7f8ee;border-left:4px solid #28a745;} .cons{background:#fdecea;border-left:4px solid #e74c3c;}",
+    ".pros h4{color:#28a745;margin-top:0;} .cons h4{color:#e74c3c;margin-top:0;}",
+    ".qa{background:#fffaf0;border:1px solid #ffe0b2;border-radius:10px;padding:16px 22px;margin:14px 0;} .qa .q{font-weight:600;color:#d35400;margin-bottom:8px;} .qa .q::before{content:'Q: ';color:#e67e22;} .qa .a{color:#34495e;padding-left:12px;border-left:3px solid #ffc107;} .qa .a::before{content:'A: ';font-weight:600;color:#27ae60;}",
+    ".highlight{background:linear-gradient(120deg,#fff9c4,#fff9c4) no-repeat;background-size:100% 40%;background-position:0 88%;padding:0 3px;}",
+    ".dim{font-family:'SF Mono',Consolas,monospace;font-size:.86em;background:#f8f9fc;border:1px dashed #c9d2e0;padding:12px 18px;border-radius:8px;margin:10px 0;white-space:pre-wrap;line-height:1.7;color:#475569;}",
+    ".toc{background:#f4f6fa;border-radius:10px;padding:20px 28px;margin-bottom:26px;} .toc ul{list-style:none;padding-left:0;} .toc li{padding:5px 0;border-bottom:1px dashed #d6dce5;} .toc li:last-child{border-bottom:none;} .toc a{color:#2c3e50;text-decoration:none;} .toc a:hover{color:#667eea;} .toc a::before{content:'◆ ';color:#667eea;font-size:.85em;}",
+    ".svg-wrap{background:#fff;border:1px solid #e3e8f0;border-radius:12px;padding:18px;margin:18px 0;overflow-x:auto;box-shadow:0 2px 10px rgba(0,0,0,.04);} .svg-wrap .caption{text-align:center;color:#7a8599;font-size:.88em;margin-top:10px;font-style:italic;}",
+    "svg{display:block;margin:0 auto;max-width:100%;height:auto;}",
+    ".paper-fig{background:#fff;border:1px solid #e3e8f0;border-radius:12px;padding:22px;margin:18px 0;box-shadow:0 2px 10px rgba(0,0,0,.04);} .paper-fig img{display:block;max-width:100%;height:auto;margin:0 auto;border-radius:6px;background:#fafbfd;} .paper-fig .caption{text-align:center;color:#475569;font-size:.9em;margin-top:12px;}",
+    "@media (max-width:768px){section{padding:22px 18px;} .pros-cons{grid-template-columns:1fr;}}",
+  ].join("\n"),
+
+  // ---- rich HTML built section-by-section (depth + per-section progress) ----
+  _shareOutlinePrompt(lang) {
+    return "你是论文分享助手。读完论文后，规划一页图文并茂分享网页的结构。只输出一个 JSON 对象（不要 ``` 包裹、不要任何多余文字）：\n" +
+      '{"title":"论文标题","tldr":"一句话说清这篇做了什么、结论是什么","tags":["关键词",3至6个],"sections":[{"id":"s1","title":"章节标题","brief":"这一章要覆盖哪些要点（一两句）"}]}\n' +
+      "要求：6–8 个章节，建议顺序：背景与问题、核心方法、关键结果、对比与讨论、局限与未来、速问速答。标题用" + lang + "。只输出 JSON。";
+  },
+  _parseShareOutline(text) {
+    try {
+      let t = (text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      const a = t.indexOf("{"), b = t.lastIndexOf("}");
+      if (a < 0 || b <= a) return null;
+      const o = JSON.parse(t.slice(a, b + 1));
+      if (!o || !Array.isArray(o.sections) || !o.sections.length) return null;
+      const sections = o.sections.map((s, i) => ({ id: String((s && s.id) || "s" + (i + 1)), title: String((s && s.title) || "章节 " + (i + 1)), brief: String((s && s.brief) || "") })).filter((s) => s.title);
+      if (!sections.length) return null;
+      return { title: String(o.title || ""), tldr: String(o.tldr || ""), tags: Array.isArray(o.tags) ? o.tags.map(String).slice(0, 6) : [], sections };
+    } catch (e) { return null; }
+  },
+  _shareSectionPrompt(lang, section, figList) {
+    return "你是论文分享助手，用" + lang + "写分享网页中的这一个章节，只输出一个 <section> 元素（不要输出其它章节、不要 ``` 包裹、不要 <html>/<style>）。\n" +
+      "章节 id=\"" + section.id + "\"，标题：" + section.title + "。要覆盖：" + (section.brief || section.title) + "。\n" +
+      "格式：<section id=\"" + section.id + "\"><h2>" + section.title + "</h2> … </section>；正文用 <h3>/<p>/<ul>，内容要具体、充分展开，引用论文里的具体数字。\n" +
+      "按内容需要选用组件（样式已定义，直接用 class）：维度/数据流 <div class=\"dim\">[B,N,d]→…</div>；优缺点 <div class=\"pros-cons\"><div class=\"pros\"><h4>优点</h4><ul>…</ul></div><div class=\"cons\"><h4>局限</h4><ul>…</ul></div></div>；多项对比用 <table>（带表头）；关键术语 <span class=\"highlight\">…</span>；流程/架构用 ```svg 手绘（根 <svg> 带 viewBox、不固定像素宽高）放进 <div class=\"svg-wrap\">…<div class=\"caption\">图N·说明</div></div>。\n" +
+      "若本章是速问速答，用 <div class=\"qa\"><div class=\"q\">问题</div><div class=\"a\">回答（带具体数字/方法）</div></div>，≥5 条，覆盖 why/how/trade-off。\n" +
+      "要展示论文自己的图表时用 [[fig:<id>]] 占位（会被替换成真实图片）。可用图表清单：\n" + (figList || "（无）") + "\n" +
+      "关键论断后可用 [B<id>]；不臆造、图表不编造。" + this._shareStyleNote();
+  },
+  _shareHeaderHtml(o) {
+    const tags = (o.tags || []).map((t) => '<span class="tag">' + this._escapeHTML(t) + "</span>").join("");
+    return "<header><h1>" + this._escapeHTML(o.title || "论文分享") + "</h1>" + (o.tldr ? "<p>" + this._escapeHTML(o.tldr) + "</p>" : "") + tags + "</header>";
+  },
+  _shareTocHtml(o) {
+    return '<div class="toc"><ul>' + (o.sections || []).map((s) => '<li><a href="#' + this._escapeHTML(s.id) + '">' + this._escapeHTML(s.title) + "</a></li>").join("") + "</ul></div>";
+  },
+  _stripHtmlFence(s) { return (s || "").trim().replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim(); },
+  _assembleShareHtml(o, sectionHtmls) {
+    const footer = '<footer style="text-align:center;color:#7a8599;font-size:.85em;margin:8px 0 0;">由 AI Reader 生成</footer>';
+    return this._shareHeaderHtml(o) + "\n" + this._shareTocHtml(o) + "\n" + sectionHtmls.join("\n") + "\n" + footer;
+  },
+  _figureListText(blocks) {
+    const figs = (blocks || []).filter((b) => b.type === "image" || b.type === "table" || b.type === "figure").slice(0, 20);
+    if (!figs.length) return "（无）";
+    return figs.map((b) => "[[fig:" + b.id + "]] " + this.figKind(b.type) + "：" + ((b.text || "").slice(0, 60) || "(无标题)")).join("\n");
+  },
+
+  _shareBaseName(state) {
+    let it = state && state.item;
+    try { if (it && it.isAttachment && it.isAttachment() && it.parentItem) it = it.parentItem; } catch (e) {}
+    let base = "";
+    try { base = (it && it.getField && it.getField("title")) || ""; } catch (e) {}
+    if (!base) base = (state.attachment && state.attachment.key) || "share";
+    return base.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80);
+  },
+  async _writeShareFile(state, ext, content) {
+    const dir = PathUtils.join(Zotero.DataDirectory.dir, "aireader", "shares");
+    await IOUtils.makeDirectory(dir, { ignoreExisting: true });
+    const path = PathUtils.join(dir, this._shareBaseName(state) + "." + ext);
+    await IOUtils.writeUTF8(path, content);
+    return path;
+  },
+  _openFile(path) {
+    try { if (typeof Zotero.launchURL === "function") { Zotero.launchURL("file://" + path); return true; } } catch (e) {}
+    try { if (Zotero.File && typeof Zotero.File.reveal === "function") { Zotero.File.reveal(path); return true; } } catch (e) {}
+    return false;
+  },
+
+  // Generate a shareable artifact from the whole paper. Its own streamed turn;
+  // does NOT push into chat history / synced note (it's a separate product).
+  async generateShare(state, fmtId) {
+    if (!this.requireKey(state)) return;
+    if (state.streaming) return;
+    const spec = this._shareFormats().find((f) => f.id === fmtId);
+    if (!spec) return;
+    this.appendUserMsg(state, "📄 生成分享材料：" + spec.label);
+    const { msg, bubble } = this.appendAssistantMsg(state);
+    bubble.classList.add("aireader-streaming");
+    state.streaming = true; state.cancel = false; this.updateSendButton(state);
+    const meta = {};
+    try {
+      await this.ensureBlocks(state);
+      const lang = this.getPref("language") || "中文";
+      if (fmtId === "html") { await this._runHtmlShare(state, bubble, msg, lang); this.setStatus(state, "", ""); return; }
+      // one-pager: single streamed pass (readable Markdown).
+      let ctx = this.buildContextBounded(state.blocks);
+      try { const fd = await this._figureDigest(state, 4); if (fd) ctx = fd + "——\n\n论文正文：\n" + ctx; } catch (e) { this.log("share figdigest: " + e); }
+      const messages = [{ role: "system", content: spec.buildSystemPrompt(lang) }, { role: "user", content: "论文内容：\n\n" + ctx }];
+      this._startWait(state, "正在生成" + spec.label + "…");
+      let acc = "", lastR = 0;
+      const res = await this._streamAnswer(messages, null, (d) => {
+        this._stopWait(state); acc += d;
+        const now = Date.now(); if (now - lastR > 140) { lastR = now; bubble.textContent = acc; }
+        this.setStatus(state, "生成中… " + acc.length + " 字", "busy");
+        if (state.chatMsgs) state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight;
+      }, () => state.cancel, meta);
+      this._stopWait(state);
+      bubble.classList.remove("aireader-streaming");
+      bubble.textContent = "";
+      await this._finishShareText(state, bubble, msg, spec, (res.text || acc || "").trim());
+      this.setStatus(state, "", "");
+    } catch (e) {
+      bubble.classList.remove("aireader-streaming");
+      bubble.textContent = state.cancel ? "（已停止）" : this._friendlyError(e);
+      this.log("generateShare error: " + e);
+    } finally {
+      this._stopWait(state); state.streaming = false; this.updateSendButton(state);
+    }
+  },
+  // Rich HTML, built section-by-section: plan an outline, then generate each
+  // section with its own focused context — deeper output + a live checklist of
+  // which part is being written.
+  async _runHtmlShare(state, bubble, msg, lang) {
+    const blocks = state.blocks;
+    const figList = this._figureListText(blocks);
+    this._startWait(state, "正在规划结构…"); bubble.textContent = "正在规划结构…";
+    const planCtx = this.buildContextBounded(blocks);
+    let planText = "";
+    try { planText = await this.callLLM([{ role: "system", content: this._shareOutlinePrompt(lang) }, { role: "user", content: "论文内容：\n\n" + planCtx }]); } catch (e) { this.log("outline: " + e); }
+    this._stopWait(state);
+    const outline = this._parseShareOutline(planText);
+    if (!outline) { // fallback: single-shot rich HTML
+      bubble.textContent = "正在生成 HTML 分享页…"; this._startWait(state, "正在生成 HTML…");
+      let one = ""; try { one = await this.callLLM([{ role: "system", content: this._shareFormats().find((f) => f.id === "html").buildSystemPrompt(lang) }, { role: "user", content: "论文内容：\n\n" + planCtx }]); } catch (e) { this.log("html fallback: " + e); }
+      this._stopWait(state);
+      bubble.classList.remove("aireader-streaming"); bubble.textContent = "";
+      await this._finishShareHtml(state, bubble, msg, { title: this._shareBaseName(state), tldr: "", tags: [], sections: [] }, [this._stripHtmlFence(one)]);
+      return;
+    }
+    bubble.classList.remove("aireader-streaming"); bubble.textContent = "";
+    const doc = state.doc;
+    const list = this._el(doc, "div", "aireader-share-checklist"); bubble.appendChild(list);
+    const rows = outline.sections.map((s) => { const r = this._el(doc, "div", "aireader-share-step", "○ " + s.title); list.appendChild(r); return r; });
+    const sectionHtmls = [];
+    for (let i = 0; i < outline.sections.length && !state.cancel; i++) {
+      const s = outline.sections[i];
+      rows[i].textContent = s.title; rows[i].classList.add("aireader-share-step-cur"); // spinner drawn via CSS ::before
+      this._startWait(state, "正在生成：" + s.title + "（" + (i + 1) + "/" + outline.sections.length + "）");
+      const secCtx = this.buildRetrievedContext(blocks, s.title + " " + s.brief);
+      let acc = "";
+      const res = await this._streamAnswer(
+        [{ role: "system", content: this._shareSectionPrompt(lang, s, figList) }, { role: "user", content: "论文内容：\n\n" + secCtx }],
+        null,
+        (d) => { this._stopWait(state); acc += d; this.setStatus(state, "正在生成：" + s.title + "（" + (i + 1) + "/" + outline.sections.length + "）… " + acc.length + " 字", "busy"); },
+        () => state.cancel, {},
+      );
+      this._stopWait(state);
+      sectionHtmls.push(this._stripHtmlFence(res.text || acc || ""));
+      rows[i].textContent = "✓ " + s.title; rows[i].classList.remove("aireader-share-step-cur"); rows[i].classList.add("aireader-share-step-done");
+    }
+    if (state.cancel) { bubble.appendChild(this._el(doc, "div", "aireader-meta", "（已停止）")); return; }
+    await this._finishShareHtml(state, bubble, msg, outline, sectionHtmls);
+  },
+  async _finishShareText(state, bubble, msg, spec, text) {
+    this.enhanceMessage(state, bubble, text);
+    const doc = state.doc;
+    const row = this._el(doc, "div", "aireader-actions"); msg.appendChild(row);
+    const mk = (label) => { const a = this._el(doc, "span", "aireader-action", label); row.appendChild(a); return a; };
+    const copy = mk("复制");
+    copy.addEventListener("click", () => { try { Zotero.Utilities.Internal.copyTextToClipboard(text); copy.textContent = "已复制"; setTimeout(() => (copy.textContent = "复制"), 1200); } catch (e) {} });
+    if (spec.id === "onepager") {
+      const note = mk("存为笔记");
+      note.addEventListener("click", async () => { note.textContent = "存中…"; try { await this.saveNoteFromText(state, text, null); note.textContent = "✓ 已存"; setTimeout(() => (note.textContent = "存为笔记"), 1500); } catch (e) { note.textContent = "存失败"; } });
+    }
+    const save = mk("保存到文件");
+    save.addEventListener("click", async () => {
+      save.textContent = "保存中…";
+      try { const p = await this._writeShareFile(state, spec.ext, text); save.textContent = "✓ 已保存"; this.setStatus(state, "已保存：" + p, "ok"); this._openFile(p); }
+      catch (e) { save.textContent = "保存失败"; this.log("writeShareFile: " + e); }
+    });
+  },
+  async _finishShareHtml(state, bubble, msg, outline, sectionHtmls) {
+    this.setStatus(state, "正在嵌入图表…", "busy");
+    const fragment = this._assembleShareHtml(outline, sectionHtmls);
+    let body = await this._embedFigures(fragment, async (id) => {
+      const b = (state.blocks || []).find((x) => x.id === id);
+      if (!b) return null;
+      try { return await this.renderRegionDataURI(state.attachment, b); } catch (e) { return null; }
+    });
+    body = this._svgFencesToInline(body);
+    const title = outline.title || this._shareBaseName(state);
+    const html = this._wrapHtmlDoc(title, body);
+    const doc = state.doc;
+    bubble.appendChild(this._el(doc, "div", "aireader-meta", "HTML 分享页已生成（" + sectionHtmls.length + " 个章节）。"));
+    const row = this._el(doc, "div", "aireader-actions"); msg.appendChild(row);
+    const mk = (label) => { const a = this._el(doc, "span", "aireader-action", label); row.appendChild(a); return a; };
+    let path = null;
+    try { path = await this._writeShareFile(state, "html", html); this.setStatus(state, "已生成：" + path, "ok"); } catch (e) { this.log("writeShareFile html: " + e); }
+    const open = mk("打开");
+    open.addEventListener("click", async () => { try { if (!path) path = await this._writeShareFile(state, "html", html); if (!this._openFile(path)) this.setStatus(state, "文件路径：" + path, "muted"); } catch (e) { this.log("open share: " + e); } });
+    const copy = mk("复制 HTML");
+    copy.addEventListener("click", () => { try { Zotero.Utilities.Internal.copyTextToClipboard(html); copy.textContent = "已复制"; setTimeout(() => (copy.textContent = "复制 HTML"), 1200); } catch (e) {} });
   },
 
   _noteFooter() {
@@ -3212,20 +3678,108 @@ AIReader = {
     } catch (e) { this.log("saveCache error: " + e); }
   },
 
-  async loadChat(attachment) {
+  async _loadChatLocal(attachment) {
     try {
       const { path } = this.chatPath(attachment);
       if (!(await IOUtils.exists(path))) return null;
       const obj = JSON.parse(await IOUtils.readUTF8(path));
-      return Array.isArray(obj.messages) ? obj.messages : null;
+      return Array.isArray(obj.messages) ? { date: obj.date || "", messages: obj.messages } : null;
     } catch (e) { return null; }
   },
 
+  async loadChat(attachment) {
+    const local = await this._loadChatLocal(attachment);
+    // Multi-machine sync: a Zotero note (which DOES sync) may hold a newer copy
+    // written on another machine. Take whichever is newer and backfill local.
+    let synced = null;
+    if (this.getPref("syncChats") !== false) { try { synced = await this._loadChatSynced(attachment); } catch (e) { this.log("loadChatSynced: " + e); } }
+    const pick = this._newerChat(local, synced);
+    if (pick.fromSync && pick.bundle) this._writeChatLocal(attachment, pick.bundle.messages).catch(() => {});
+    return (pick.bundle && pick.bundle.messages) || null;
+  },
+
+  // Pick the newer of local vs synced chat bundles by ISO date; ties keep local.
+  _newerChat(local, synced) {
+    if (!synced) return { bundle: local, fromSync: false };
+    if (!local) return { bundle: synced, fromSync: true };
+    const ls = Date.parse(local.date || "") || 0;
+    const ss = Date.parse(synced.date || "") || 0;
+    return ss > ls ? { bundle: synced, fromSync: true } : { bundle: local, fromSync: false };
+  },
+
+  async _writeChatLocal(attachment, hist) {
+    const { dir, path } = this.chatPath(attachment);
+    await IOUtils.makeDirectory(dir, { ignoreExisting: true });
+    await IOUtils.writeUTF8(path, JSON.stringify({ version: 1, date: new Date().toISOString(), messages: hist }));
+  },
+
   async saveChat(attachment, hist) {
+    try { await this._writeChatLocal(attachment, hist); } catch (e) { this.log("saveChat error: " + e); }
+    // Mirror to a synced Zotero note (debounced — note writes are heavier than a
+    // file write and happen on every turn).
+    if (this.getPref("syncChats") !== false) this._syncChatDebounced(attachment, hist);
+  },
+
+  // ---- synced copy: a dedicated "AI Reader Chat Data"-tagged note under the
+  // parent item. Its body is the chat JSON, HTML-escaped inside <pre>. Zotero
+  // notes sync across machines; this note is separate from the user-readable
+  // "存为笔记" note so the two never collide. ----
+  _chatDataToNote(hist) {
+    const json = JSON.stringify({ version: 1, date: new Date().toISOString(), messages: hist });
+    return "<p>AI Reader 对话记录（自动同步，请勿编辑）</p>\n<pre data-air-chat=\"1\">" + this._escapeHTML(json) + "</pre>";
+  },
+  _parseChatDataNote(html) {
     try {
-      const { dir, path } = this.chatPath(attachment);
-      await IOUtils.makeDirectory(dir, { ignoreExisting: true });
-      await IOUtils.writeUTF8(path, JSON.stringify({ version: 1, date: new Date().toISOString(), messages: hist }));
-    } catch (e) { this.log("saveChat error: " + e); }
+      const m = /<pre[^>]*data-air-chat[^>]*>([\s\S]*?)<\/pre>/i.exec(html || "");
+      if (!m) return null;
+      const json = m[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+      const obj = JSON.parse(json);
+      return Array.isArray(obj.messages) ? { date: obj.date || "", messages: obj.messages } : null;
+    } catch (e) { return null; }
+  },
+  _parentOf(attachment) {
+    try { return (attachment && attachment.parentItem) || null; } catch (e) { return null; }
+  },
+  async _findChatDataNote(parent) {
+    try {
+      if (!parent || !parent.getNotes) return null;
+      for (const id of (parent.getNotes() || [])) {
+        const n = Zotero.Items.get(id);
+        if (n && n.hasTag && n.hasTag("AI Reader Chat Data")) return n;
+      }
+    } catch (e) {}
+    return null;
+  },
+  async _loadChatSynced(attachment) {
+    const parent = this._parentOf(attachment);
+    if (!parent) return null;
+    const note = await this._findChatDataNote(parent);
+    if (!note) return null;
+    return this._parseChatDataNote(note.getNote());
+  },
+  _syncChatDebounced(attachment, hist) {
+    try {
+      this._syncChatTimers = this._syncChatTimers || new Map();
+      const key = attachment.libraryID + "-" + attachment.key;
+      const prev = this._syncChatTimers.get(key);
+      if (prev) { try { clearTimeout(prev); } catch (e) {} }
+      const t = setTimeout(() => { this._syncChatTimers.delete(key); this._writeChatSynced(attachment, hist).catch((e) => this.log("writeChatSynced: " + e)); }, 4000);
+      if (t && t.unref) t.unref();
+      this._syncChatTimers.set(key, t);
+    } catch (e) { this.log("syncChatDebounced: " + e); }
+  },
+  async _writeChatSynced(attachment, hist) {
+    const parent = this._parentOf(attachment);
+    if (!parent) return; // standalone attachment: nothing to hang a synced note on
+    const body = this._chatDataToNote(hist);
+    const existing = await this._findChatDataNote(parent);
+    if (existing) { existing.setNote(body); await existing.saveTx(); return existing; }
+    const note = new Zotero.Item("note");
+    note.libraryID = parent.libraryID;
+    if (parent.isRegularItem && parent.isRegularItem()) note.parentID = parent.id;
+    note.setNote(body);
+    try { note.addTag("AI Reader Chat Data"); } catch (e) {}
+    await note.saveTx();
+    return note;
   },
 };

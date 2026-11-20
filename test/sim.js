@@ -950,6 +950,107 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
  delete prefs['aireader.serperKey'];
  console.log('web tools (search gating + fetch + execTool): OK');
 
+ // ---- multi-paper comparison basket (Feature A) ----
+ { const body2={}; const st2={ item:null, attachment:{id:7,key:'K2',libraryID:1}, blocks, doc, body:body2,
+     status:stubEl(), chatMsgs:stubEl(), input:{value:''}, send:stubEl(),
+     cmpBtn:stubEl(), multiBtn:stubEl(), basketBar:stubEl(), basket:[], multiMode:false, streaming:false, cancel:false };
+   A._bodyState.set(body2, st2);
+   // basket starts empty; the current paper is always folded into the list
+   assert(A._basketList(st2).length===1 && A._basketList(st2)[0].key==='K2','_basketList folds in the current paper');
+   // add a second paper (seed its blocks in the store so _basketBlocks finds them)
+   A._blockStore.set('KB', blocks);
+   st2.basket.push({ key:'KB', id:99, libraryID:1, title:'Paper B 对比篇' });
+   assert(A._basketList(st2).length===2,'_basketList = basket + current (deduped)');
+   // _basketToggle adds/removes the CURRENT paper
+   A._basketToggle(st2);
+   assert(st2.basket.some(p=>p.key==='K2'),'_basketToggle adds current paper');
+   assert(/✓/.test(st2.cmpBtn.textContent),'_updateCmpBtn reflects added state');
+   A._basketToggle(st2);
+   assert(!st2.basket.some(p=>p.key==='K2'),'_basketToggle removes current paper');
+   // _toggleMulti flips the mode flag + relabels
+   A._toggleMulti(st2);
+   assert(st2.multiMode===true && /开/.test(st2.multiBtn.textContent),'_toggleMulti turns cross-paper mode on');
+   // multi context: labelled per-paper sections, colliding [B id] stripped to (p),
+   // total within the maxChars budget
+   const mctx=await A._buildMultiContext(st2,'vision encoder pretraining');
+   assert(/【论文 1 · /.test(mctx) && /【论文 2 · /.test(mctx),'multi context labels each paper');
+   assert(/Paper B 对比篇/.test(mctx),'multi context carries basket paper titles');
+   assert(!/\[B\d+/.test(mctx) && /\(p/.test(mctx),'multi context strips colliding [B id], keeps (p页)');
+   assert(mctx.length <= (Number(A.getPref('maxChars'))||60000),'multi context stays within maxChars budget');
+   // onChatSend routes to the multi path only when mode is on AND ≥2 papers
+   { const orig=A._send; let seen=null; A._send=async(s,t,o)=>{ seen=o; };
+     st2.input.value='对比这两篇的方法';
+     await A.onChatSend(body2);
+     assert(seen && seen.multi===true,'onChatSend sets opts.multi when cross-paper mode on with ≥2 papers');
+     st2.multiMode=false; st2.input.value='单篇问题';
+     await A.onChatSend(body2);
+     assert(seen && !seen.multi,'onChatSend stays single-paper when mode off');
+     A._send=orig;
+   }
+   console.log('multi-paper comparison basket: OK');
+ }
+
+ // ---- conversation backup / multi-machine sync (Feature B) ----
+ { // chat JSON <-> synced-note HTML round-trips, surviving HTML-special content
+   const hist=[{role:'user',content:'对比 <b>A & B</b> 的方法 > 结果'},{role:'assistant',content:'见 [B5] 与 </pre> 边界'}];
+   const noteHTML=A._chatDataToNote(hist);
+   assert(/<pre[^>]*data-air-chat/.test(noteHTML),'synced note wraps JSON in <pre data-air-chat>');
+   assert(!/<b>A & B<\/b>/.test(noteHTML),'HTML-special content is escaped inside the note');
+   const back=A._parseChatDataNote(noteHTML);
+   assert(back && back.messages.length===2 && back.messages[0].content===hist[0].content && back.messages[1].content===hist[1].content,'synced-note JSON round-trips losslessly');
+   assert(typeof back.date==='string' && back.date.length>0,'synced bundle carries a date');
+   assert(A._parseChatDataNote('<p>no data here</p>')===null,'_parseChatDataNote returns null when no payload');
+   // _newerChat: date comparison picks the fresher side; ties keep local
+   const older={date:'2026-01-01T00:00:00.000Z',messages:[{role:'user',content:'old'}]};
+   const newer={date:'2026-02-01T00:00:00.000Z',messages:[{role:'user',content:'new'}]};
+   assert(A._newerChat(older,newer).fromSync===true && A._newerChat(older,newer).bundle.messages[0].content==='new','_newerChat prefers the newer synced copy');
+   assert(A._newerChat(newer,older).fromSync===false,'_newerChat keeps local when local is newer');
+   assert(A._newerChat(older,null).bundle===older && !A._newerChat(older,null).fromSync,'_newerChat falls back to local when no synced copy');
+   assert(A._newerChat(null,newer).fromSync===true,'_newerChat uses synced when no local copy');
+   assert(A._newerChat(null,null).bundle===null,'_newerChat null-safe when neither exists');
+   const tie={date:older.date,messages:[{role:'user',content:'tie'}]};
+   assert(A._newerChat(older,tie).fromSync===false,'_newerChat keeps local on a date tie');
+   console.log('conversation backup / sync (round-trip + newer-wins): OK');
+ }
+
+ // ---- share-material generator (一页总结 / 幻灯片 / HTML) ----
+ { const fmts=A._shareFormats();
+   assert(fmts.length===2 && fmts.map(f=>f.id).join(',')==='onepager,html','2 share formats registered (no slides)');
+   assert(fmts.every(f=>f.label&&f.ext&&f.buildSystemPrompt('中文').length>40),'each share format has label/ext/prompt');
+   assert(!fmts.find(f=>f.id==='slides'),'slides format removed');
+   const htmlP=fmts.find(f=>f.id==='html').buildSystemPrompt('中文');
+   assert(/HTML/.test(htmlP)&&/svg-wrap/.test(htmlP)&&/class=\"qa\"/.test(htmlP)&&/\[\[fig:/.test(htmlP),'html prompt uses the component system (svg-wrap/qa/fig)');
+   // _embedFigures: placeholder → figure card; unresolved → dropped (no raw token)
+   const emb=await A._embedFigures('见 [[fig:3]] 和 [[fig:9]]。', async(id)=> id===3?'data:image/png;base64,AAA':null);
+   assert(/<div class="paper-fig"><img src="data:image\/png;base64,AAA"/.test(emb),'_embedFigures inserts a paper-fig card for resolved figures');
+   assert(!/\[\[fig:9\]\]/.test(emb)&&!/\[\[fig:3\]\]/.test(emb),'_embedFigures leaves no raw fig tokens');
+   const embThrow=await A._embedFigures('x [[fig:1]] y', async()=>{ throw new Error('no'); });
+   assert(!/\[\[fig:1\]\]/.test(embThrow),'_embedFigures drops placeholder when resolver throws');
+   // _svgFencesToInline
+   const sv=A._svgFencesToInline("a\n```svg\n<svg viewBox='0 0 10 10'></svg>\n```\nb\n```js\nx=1\n```");
+   assert(/<svg viewBox/.test(sv)&&!/```svg/.test(sv),'_svgFencesToInline inlines svg fences');
+   assert(/```js/.test(sv),'_svgFencesToInline leaves non-svg fences alone');
+   // _wrapHtmlDoc
+   const doc2=A._wrapHtmlDoc('My Paper','<p>hi</p>');
+   assert(/^<!doctype html/i.test(doc2),'_wrapHtmlDoc starts with doctype');
+   assert(/<title>My Paper<\/title>/.test(doc2)&&/<style>/.test(doc2)&&/<p>hi<\/p>/.test(doc2),'_wrapHtmlDoc embeds title, style, body');
+   assert(/&lt;script&gt;/.test(A._wrapHtmlDoc('<script>','x')),'_wrapHtmlDoc escapes the title');
+   // section-by-section HTML pipeline
+   assert(/JSON/.test(A._shareOutlinePrompt('中文')),'outline prompt asks for JSON');
+   const ol=A._parseShareOutline('```json\n{"title":"T","tldr":"one","tags":["a","b"],"sections":[{"id":"s1","title":"背景","brief":"x"},{"id":"s2","title":"方法","brief":"y"}]}\n```');
+   assert(ol&&ol.title==='T'&&ol.sections.length===2&&ol.sections[1].title==='方法','_parseShareOutline reads JSON (tolerates fence)');
+   assert(A._parseShareOutline('not json')===null,'_parseShareOutline null on junk');
+   assert(A._parseShareOutline('{"title":"x","sections":[]}')===null,'_parseShareOutline rejects empty sections');
+   const secP=A._shareSectionPrompt('中文',{id:'s2',title:'方法',brief:'讲清楚'},'[[fig:3]] 图：arch');
+   assert(/s2/.test(secP)&&/方法/.test(secP)&&/svg-wrap/.test(secP)&&/\[\[fig:/.test(secP),'section prompt carries id/title/components/figlist');
+   assert(A._stripHtmlFence('```html\n<section>x</section>\n```')==='<section>x</section>','_stripHtmlFence unwraps fenced section');
+   assert(/<header>/.test(A._shareHeaderHtml(ol))&&/class="tag"/.test(A._shareHeaderHtml(ol)),'_shareHeaderHtml renders header + tags');
+   assert(/href="#s1"/.test(A._shareTocHtml(ol))&&/href="#s2"/.test(A._shareTocHtml(ol)),'_shareTocHtml links each section');
+   const asm=A._assembleShareHtml(ol,['<section id="s1">A</section>','<section id="s2">B</section>']);
+   assert(/<header>/.test(asm)&&/class="toc"/.test(asm)&&/id="s1"/.test(asm)&&/id="s2"/.test(asm)&&/<footer/.test(asm),'_assembleShareHtml joins header+toc+sections+footer');
+   console.log('share-material generator (formats + embed + wrap + outline): OK');
+ }
+
  // ---- layout safety net: assistant bubbles must constrain every descendant so
  // long URLs / English tool briefs / wide artifacts can't overflow the panel ----
  { const css=fs.readFileSync(path.join(__dirname,'..','content','style.css'),'utf8').replace(/\s+/g,' ');
