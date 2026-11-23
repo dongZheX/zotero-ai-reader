@@ -61,11 +61,22 @@
 
 /* share-material generator button */
 .aireader-sharebtn { font-size: 11px; }
+.aireader-transbtn { font-size: 11px; }
+.aireader-genbtn, .aireader-optbtn { font-size: 11px; }
+.aireader-trans-label { font-size: 12.5px; color: var(--air-accent); font-weight: 600; margin-bottom: 6px; }
+.aireader-progress { height: 7px; border-radius: 999px; background: var(--fill-quinary, rgba(127,127,127,0.18)); overflow: hidden; }
+.aireader-progress-fill { height: 100%; width: 0; border-radius: 999px; background: var(--air-accent); transition: width .3s ease; }
+/* inline bilingual translation pane (scrollable; no forced note) */
+.aireader-trans-view { max-height: 460px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--air-border, rgba(127,127,127,0.25)); border-radius: 10px; }
+.aireader-trans-view blockquote { margin: 4px 0 10px; padding-left: 10px; border-inline-start: 3px solid var(--air-accent); color: var(--fill-secondary, inherit); }
 .aireader-share-checklist { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
 .aireader-share-step { color: var(--fill-secondary, #6b7280); }
 .aireader-share-step-cur { color: var(--air-accent); font-weight: 600; }
 .aireader-share-step-cur::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: aireader-spin 0.7s linear infinite; }
 .aireader-share-step-done { color: inherit; }
+.aireader-share-wait { color: var(--air-accent); font-weight: 600; font-size: 12.5px; margin-bottom: 6px; }
+.aireader-share-wait::before { content: ""; display: inline-block; width: 11px; height: 11px; margin-right: 7px; vertical-align: -1px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: aireader-spin 0.7s linear infinite; }
+.aireader-share-wait:empty { display: none; }
 @keyframes aireader-spin { to { transform: rotate(360deg); } }
 
 /* multi-paper comparison: add-to-basket + cross-paper toggle */

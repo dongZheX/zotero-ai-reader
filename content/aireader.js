@@ -141,6 +141,14 @@ AIReader = {
       pluginID: this.id,
       header: { l10nID: "aireader-section-header", icon: this.rootURI + "content/icons/ai16.svg" },
       sidenav: { l10nID: "aireader-section-sidenav", icon: this.rootURI + "content/icons/ai20.svg" },
+      // Settings button lives in the section header row (next to the collapse
+      // chevron) via Zotero's native sectionButtons API.
+      sectionButtons: [{
+        type: "ai-reader-settings",
+        icon: this.rootURI + "content/icons/gear.svg",
+        l10nID: "aireader-section-settings",
+        onClick: () => { try { Zotero.Utilities.Internal.openPreferences(AIReader._prefPaneID); } catch (e) { AIReader.log("openPreferences: " + e); } },
+      }],
       onItemChange: ({ item, setEnabled }) => { setEnabled(AIReader.canHandle(item)); return true; },
       onRender: ({ body, item, doc }) => { AIReader.renderSkeleton(body, item, doc); },
       onAsyncRender: async ({ body, item, doc }) => { await AIReader.hydrate(body, item, doc); },
@@ -253,7 +261,7 @@ AIReader = {
     if (old) {
       this.closeModelMenu(old);
       this.closeSkillMenu(old);
-      this.closeShareMenu(old);
+      this._closePopMenu(old);
       if (old._ro) { try { old._ro.disconnect(); } catch (e) {} old._ro = null; }
       if (old._onWinResize) { try { old.doc.defaultView.removeEventListener("resize", old._onWinResize); } catch (e) {} old._onWinResize = null; }
     }
@@ -265,54 +273,24 @@ AIReader = {
     const agentBtn = this._el(doc, "div", "aireader-top-btn aireader-top-agent", "✨ 通读并标注");
     agentBtn.title = "让 AI 通读全文，自动按类别高亮+批注（可一键撤销）";
     agentBtn.addEventListener("click", () => { const st = this._bodyState.get(body); if (st) this.agentAnnotate(st); });
-    // deep-read toggle: when on, the model traverses the whole paper and reads
-    // figures aggressively (more tool calls, slower, more thorough).
-    const deepBtn = this._el(doc, "div", "aireader-top-btn aireader-deep", "深读 " + (this._deepRead ? "开" : "关"));
-    deepBtn.title = "深读模式：让模型遍历所有章节、主动读图，覆盖更全（更慢更贵）";
-    if (this._deepRead) deepBtn.classList.add("aireader-deep-on");
-    deepBtn.addEventListener("click", () => {
-      this._deepRead = !this._deepRead;
-      deepBtn.textContent = "深读 " + (this._deepRead ? "开" : "关");
-      deepBtn.classList.toggle("aireader-deep-on", this._deepRead);
-    });
     // reading-skill selector: switches the injected method + the quick chips.
     const skillBtn = this._el(doc, "div", "aireader-top-btn aireader-skillbtn", "技能 ▾");
     skillBtn.title = "选择阅读技能：切换方法与下方快捷按钮";
     skillBtn.addEventListener("click", (ev) => { ev.stopPropagation(); this.toggleSkillMenu(body); });
-    const noteBtn = this._el(doc, "div", "aireader-top-btn", "存为笔记");
-    noteBtn.title = "把当前对话存为 Zotero 笔记";
-    noteBtn.addEventListener("click", () => this.saveNote(body));
-    // one-click "share material" generator (one-pager / slides / HTML page)
-    const shareBtn = this._el(doc, "div", "aireader-top-btn aireader-sharebtn", "📄 分享 ▾");
-    shareBtn.title = "把这篇论文一键生成可分享的材料（一页总结 / 幻灯片 / HTML）";
-    shareBtn.addEventListener("click", (ev) => { ev.stopPropagation(); this.toggleShareMenu(body); });
-    // Multi-paper comparison: ➕ adds the current paper to a session "basket";
-    // 跨论文 toggles multi-paper mode (questions answered across the basket).
-    const cmpBtn = this._el(doc, "div", "aireader-top-btn aireader-cmpbtn", "➕ 对比");
-    cmpBtn.title = "把当前论文加入对比篮子（跨论文提问用）";
-    cmpBtn.addEventListener("click", () => { const st = this._bodyState.get(body); if (st) this._basketToggle(st); });
-    const multiBtn = this._el(doc, "div", "aireader-top-btn aireader-multibtn", "跨论文 关");
-    multiBtn.title = "开启后，提问会跨对比篮子里的多篇论文综合/对比作答";
-    multiBtn.addEventListener("click", () => { const st = this._bodyState.get(body); if (st) this._toggleMulti(st); });
-    const gear = this._el(doc, "div", "aireader-gear", "⚙ 设置");
-    gear.title = "打开 AI Reader 设置";
-    gear.addEventListener("click", () => Zotero.Utilities.Internal.openPreferences(AIReader._prefPaneID));
+    // Consolidated menus (keeps the row short): 生成 = export/produce actions,
+    // 选项 = toggles/modes.
+    const genBtn = this._el(doc, "div", "aireader-top-btn aireader-genbtn", "生成 ▾");
+    genBtn.title = "存为笔记 / 一页总结 / HTML 分享页 / 全文翻译";
+    genBtn.addEventListener("click", (ev) => { ev.stopPropagation(); this.toggleGenMenu(body); });
+    const optBtn = this._el(doc, "div", "aireader-top-btn aireader-optbtn", "选项 ▾");
+    optBtn.title = "深读模式 / 对比篮子 / 跨论文提问";
+    optBtn.addEventListener("click", (ev) => { ev.stopPropagation(); this.toggleOptMenu(body); });
     top.appendChild(agentBtn);
     top.appendChild(skillBtn);
-    top.appendChild(deepBtn);
-    top.appendChild(cmpBtn);
-    top.appendChild(multiBtn);
-    top.appendChild(noteBtn);
-    top.appendChild(shareBtn);
+    top.appendChild(genBtn);
+    top.appendChild(optBtn);
     // (the button row is appended just above the composer below, not at the top,
     //  so the input area is the visual focus)
-
-    // Gear sits in a thin bar at the very TOP of the panel (right-aligned, next
-    // to Zotero's section collapse control) so 设置 is always reachable up top.
-    const topbar = this._el(doc, "div", "aireader-topbar");
-    topbar.appendChild(this._el(doc, "div", "aireader-foot-spacer"));
-    topbar.appendChild(gear);
-    body.appendChild(topbar);
 
     const status = this._el(doc, "div", "aireader-status");
     body.appendChild(status);
@@ -368,8 +346,8 @@ AIReader = {
     const state = {
       item, attachment: null, blocks: null, doc, body,
       status, chatMsgs, input, send, modelPill, skillBtn, chips, composer, footer, preview,
-      cmpBtn, multiBtn, basketBar, basket: [], multiMode: false, shareBtn,
-      modelMenu: null, modelList: null, skillMenu: null, shareMenu: null, _onDoc: null, _onSkillDoc: null, _onShareDoc: null, streaming: false, cancel: false,
+      genBtn, optBtn, basketBar, basket: [], multiMode: false,
+      modelMenu: null, modelList: null, skillMenu: null, popMenu: null, _onDoc: null, _onSkillDoc: null, _onPopDoc: null, streaming: false, cancel: false,
     };
     this._bodyState.set(body, state);
     this.updateModelPill(state);
@@ -497,39 +475,60 @@ AIReader = {
     if (state.skillMenu) { state.skillMenu.remove(); state.skillMenu = null; }
   },
 
-  // ---- share-material menu (一页总结 / 幻灯片 / HTML) ----
-  toggleShareMenu(body) {
-    const state = this._bodyState.get(body);
-    if (!state) return;
-    if (state.shareMenu) { this.closeShareMenu(state); return; }
+  // ---- consolidated 生成 / 选项 dropdowns ----
+  // Generic popup anchored to a button; items = {label, desc?, checked?, onClick}.
+  _openPopMenu(state, anchor, items) {
+    this._closePopMenu(state);
     this.closeModelMenu(state); this.closeSkillMenu(state);
     const doc = state.doc;
     const C = this._menuColors(doc);
     const menu = this._el(doc, "div", "aireader-skillmenu aireader-sharemenu");
     menu.style.cssText += ";background:" + C.bg + ";color:" + C.fg + ";border:1px solid " + C.border + ";font-family:" + this._UIFONT + ";";
-    for (const f of this._shareFormats()) {
+    for (const item of items) {
       const it = this._el(doc, "div", "aireader-skillitem");
-      const t = this._el(doc, "div", "aireader-skillitem-t", f.label);
-      const d = this._el(doc, "div", "aireader-skillitem-d", f.desc || "");
-      it.appendChild(t); it.appendChild(d);
+      const lbl = (item.checked === undefined ? "" : (item.checked ? "☑ " : "☐ ")) + item.label;
+      const t = this._el(doc, "div", "aireader-skillitem-t", lbl);
+      it.appendChild(t);
+      if (item.desc) { const d = this._el(doc, "div", "aireader-skillitem-d", item.desc); d.style.cssText += ";color:" + C.muted + ";font-size:11px;font-weight:400;"; it.appendChild(d); }
       it.style.cssText += ";padding:6px 10px;cursor:pointer;color:" + C.fg + ";font-family:" + this._UIFONT + ";";
-      d.style.cssText += ";color:" + C.muted + ";font-size:11px;font-weight:400;";
       it.addEventListener("mouseenter", () => { it.style.background = C.hover; });
       it.addEventListener("mouseleave", () => { it.style.background = "transparent"; });
-      it.addEventListener("click", (ev) => { ev.stopPropagation(); this.closeShareMenu(state); this.generateShare(state, f.id); });
+      it.addEventListener("click", (ev) => { ev.stopPropagation(); this._closePopMenu(state); item.onClick(); });
       menu.appendChild(it);
     }
-    state.shareMenu = menu;
-    body.appendChild(menu);
-    this._positionMenu(state, menu, state.shareBtn);
-    const onDoc = (ev) => { if (state.shareMenu && !state.shareMenu.contains(ev.target) && ev.target !== state.shareBtn) this.closeShareMenu(state); };
-    state._onShareDoc = onDoc;
+    state.popMenu = menu;
+    state.body.appendChild(menu);
+    this._positionMenu(state, menu, anchor);
+    const onDoc = (ev) => { if (state.popMenu && !state.popMenu.contains(ev.target) && ev.target !== anchor) this._closePopMenu(state); };
+    state._onPopDoc = onDoc;
     setTimeout(() => doc.addEventListener("click", onDoc), 0);
   },
-  closeShareMenu(state) {
+  _closePopMenu(state) {
     if (!state) return;
-    if (state._onShareDoc) { try { state.doc.removeEventListener("click", state._onShareDoc); } catch (e) {} state._onShareDoc = null; }
-    if (state.shareMenu) { state.shareMenu.remove(); state.shareMenu = null; }
+    if (state._onPopDoc) { try { state.doc.removeEventListener("click", state._onPopDoc); } catch (e) {} state._onPopDoc = null; }
+    if (state.popMenu) { state.popMenu.remove(); state.popMenu = null; }
+  },
+  toggleGenMenu(body) {
+    const state = this._bodyState.get(body);
+    if (!state) return;
+    if (state.popMenu) { this._closePopMenu(state); return; }
+    this._openPopMenu(state, state.genBtn, [
+      { label: "存为笔记", desc: "把当前对话存为 Zotero 笔记", onClick: () => this.saveNote(body) },
+      { label: "一页总结", desc: "结构化 Markdown，适合存笔记", onClick: () => this.generateShare(state, "onepager") },
+      { label: "HTML 分享页", desc: "图文并茂单文件网页，嵌入本文图表", onClick: () => this.generateShare(state, "html") },
+      { label: "全文翻译", desc: "双语对照，生成双语笔记/文件", onClick: () => this.generateTranslation(body) },
+    ]);
+  },
+  toggleOptMenu(body) {
+    const state = this._bodyState.get(body);
+    if (!state) return;
+    if (state.popMenu) { this._closePopMenu(state); return; }
+    const inBasket = !!(state.attachment && (state.basket || []).some((p) => p.key === state.attachment.key));
+    this._openPopMenu(state, state.optBtn, [
+      { label: "深读模式", desc: "遍历所有章节、主动读图（更慢更贵）", checked: !!this._deepRead, onClick: () => { this._deepRead = !this._deepRead; this.setStatus(state, "深读模式：" + (this._deepRead ? "开" : "关"), "muted"); } },
+      { label: inBasket ? "移出对比篮子" : "加入对比篮子", desc: "把当前论文加入/移出跨论文对比", onClick: () => this._basketToggle(state) },
+      { label: "跨论文提问", desc: "提问跨对比篮子里的多篇论文综合作答", checked: !!state.multiMode, onClick: () => this._toggleMulti(state) },
+    ]);
   },
 
   updateModelPill(state) {
@@ -670,7 +669,7 @@ AIReader = {
       let hist = this._chatStore.get(att.key);
       if (!hist) { hist = (await this.loadChat(att)) || []; this._chatStore.set(att.key, hist); }
       this.renderChatHistory(state, hist);
-      this._updateCmpBtn(state); this._renderBasket(state); // reflect comparison-basket state for this paper
+      this._renderBasket(state); // reflect comparison-basket state for this paper
       this.setStatus(state, "", "muted");
     } catch (e) { this.log("hydrate error: " + e); this.setStatus(state, this._friendlyError(e), "error"); }
   },
@@ -713,8 +712,16 @@ AIReader = {
   },
 
   async extractBlocks(attachmentID) {
+    // Web snapshots / HTML attachments aren't PDFs — read the HTML file and turn
+    // it into paragraph blocks (no page coords, so cite-only, like the fallback).
+    try {
+      const it = await Zotero.Items.getAsync(attachmentID);
+      const ct = it && it.attachmentContentType;
+      if (ct === "text/html" || ct === "application/xhtml+xml") { const b = await this._extractHtmlBlocks(it); if (b && b.length) return b; }
+    } catch (e) { this.log("html detect: " + e); }
     if (!Zotero.SDT || typeof Zotero.SDT.getReader !== "function") return this.extractBlocksFallback(attachmentID);
-    const reader = await Zotero.SDT.getReader(attachmentID, { isPriority: true });
+    let reader = null;
+    try { reader = await Zotero.SDT.getReader(attachmentID, { isPriority: true }); } catch (e) { this.log("SDT getReader: " + e); }
     if (!reader) return this.extractBlocksFallback(attachmentID);
     const struct = await reader.materialize();
     const pages = (struct.catalog && struct.catalog.pages) || [];
@@ -831,6 +838,28 @@ AIReader = {
       for (const h of hit) { if (h.seg.pi === pi) for (const r of h.seg.rects) rects.push(r); }
       push(node.type || "paragraph", t, pi, rects);
     }
+  },
+
+  // Read an HTML snapshot / HTML attachment → paragraph blocks. Prefers the
+  // on-disk file (most reliable), falls back to Zotero's indexed attachmentText.
+  async _extractHtmlBlocks(item) {
+    let fp = "";
+    try { fp = (item.getFilePath && item.getFilePath()) || ""; } catch (e) {}
+    let text = "";
+    // 1) Zotero's own clean full-text cache sits next to the snapshot file
+    //    (.zotero-ft-cache) — small, markup/JS already stripped. Far more reliable
+    //    than stripping a 3-4 MB inlined web snapshot ourselves.
+    if (fp) { try { const cache = PathUtils.join(PathUtils.parent(fp), ".zotero-ft-cache"); if (await IOUtils.exists(cache)) text = await IOUtils.readUTF8(cache); } catch (e) { this.log("ft-cache: " + e); } }
+    // 2) the indexed attachmentText getter (also backed by that cache)
+    if (!text.trim()) { try { text = (await item.attachmentText) || ""; } catch (e) {} }
+    // 3) last resort: strip the raw HTML file (guarded + size-capped)
+    if (!text.trim() && fp) {
+      try { if (await IOUtils.exists(fp)) { let raw = await IOUtils.readUTF8(fp); if (raw.length > 4000000) raw = raw.slice(0, 4000000); text = this._htmlToText(raw) || ""; } } catch (e) { this.log("strip snapshot: " + e); }
+    }
+    if (!text || !text.trim()) return null;
+    const paras = text.split(/\n\s*\n|\n/).map((t) => t.replace(/[ \t ]+/g, " ").trim()).filter((t) => t.length > 1);
+    let id = 0;
+    return paras.map((t) => ({ id: id++, type: "paragraph", text: t.length > 2000 ? t.slice(0, 2000) + "…" : t, position: null, pageLabel: "?", pageHeight: 792 }));
   },
 
   async extractBlocksFallback(attachmentID) {
@@ -2491,22 +2520,13 @@ AIReader = {
       state.basket.push({ key, id: state.attachment.id, libraryID: state.attachment.libraryID, title: meta.title || "未命名论文" });
     }
     this._renderBasket(state);
-    this._updateCmpBtn(state);
-  },
-  _updateCmpBtn(state) {
-    if (!state.cmpBtn) return;
-    const inB = state.attachment && (state.basket || []).some((p) => p.key === state.attachment.key);
-    state.cmpBtn.textContent = inB ? "✓ 已加入" : "➕ 对比";
-    state.cmpBtn.classList.toggle("aireader-cmpbtn-on", !!inB);
+    const inB0 = state.attachment && (state.basket || []).some((p) => p.key === state.attachment.key);
+    this.setStatus(state, inB0 ? "已加入对比篮子。" : "已移出对比篮子。", "muted");
   },
   _toggleMulti(state) {
     state.multiMode = !state.multiMode;
-    if (state.multiBtn) {
-      state.multiBtn.textContent = "跨论文 " + (state.multiMode ? "开" : "关");
-      state.multiBtn.classList.toggle("aireader-multibtn-on", state.multiMode);
-    }
     const n = this._basketList(state).length;
-    if (state.multiMode && n < 2) this.setStatus(state, "跨论文已开：用 ➕ 对比 把要对比的论文加入篮子（至少 2 篇）。", "muted");
+    if (state.multiMode && n < 2) this.setStatus(state, "跨论文已开：在「选项 ▾ · 加入对比篮子」把要对比的论文加进来（至少 2 篇）。", "muted");
     else if (state.multiMode) this.setStatus(state, "跨论文已开：提问将综合 " + n + " 篇论文。", "muted");
     else this.setStatus(state, "跨论文已关。", "muted");
     this._renderBasket(state);
@@ -2526,13 +2546,13 @@ AIReader = {
       x.addEventListener("click", () => {
         const i = state.basket.findIndex((q) => q.key === p.key);
         if (i >= 0) state.basket.splice(i, 1);
-        this._renderBasket(state); this._updateCmpBtn(state);
+        this._renderBasket(state);
       });
       chip.appendChild(x);
       bar.appendChild(chip);
     });
     const clear = this._el(doc, "span", "aireader-basket-clear", "清空对比");
-    clear.addEventListener("click", () => { state.basket = []; this._renderBasket(state); this._updateCmpBtn(state); });
+    clear.addEventListener("click", () => { state.basket = []; this._renderBasket(state); });
     bar.appendChild(clear);
   },
   // Blocks for any basket paper: current paper uses live blocks, others come
@@ -3035,7 +3055,12 @@ AIReader = {
       await this.ensureBlocks(state);
       const lang = this.getPref("language") || "中文";
       if (fmtId === "html") { await this._runHtmlShare(state, bubble, msg, lang); this.setStatus(state, "", ""); return; }
-      // one-pager: single streamed pass (readable Markdown).
+      // one-pager: single streamed pass (readable Markdown). Show a spinner +
+      // label while prefilling / streaming so it never looks like a dead box.
+      bubble.classList.remove("aireader-streaming");
+      bubble.textContent = "";
+      const waitRow = this._el(state.doc, "div", "aireader-share-wait", "正在生成一页总结…"); bubble.appendChild(waitRow);
+      const contentEl = this._el(state.doc, "div", ""); bubble.appendChild(contentEl);
       let ctx = this.buildContextBounded(state.blocks);
       try { const fd = await this._figureDigest(state, 4); if (fd) ctx = fd + "——\n\n论文正文：\n" + ctx; } catch (e) { this.log("share figdigest: " + e); }
       const messages = [{ role: "system", content: spec.buildSystemPrompt(lang) }, { role: "user", content: "论文内容：\n\n" + ctx }];
@@ -3043,12 +3068,11 @@ AIReader = {
       let acc = "", lastR = 0;
       const res = await this._streamAnswer(messages, null, (d) => {
         this._stopWait(state); acc += d;
-        const now = Date.now(); if (now - lastR > 140) { lastR = now; bubble.textContent = acc; }
+        const now = Date.now(); if (now - lastR > 140) { lastR = now; contentEl.textContent = acc; }
         this.setStatus(state, "生成中… " + acc.length + " 字", "busy");
         if (state.chatMsgs) state.chatMsgs.scrollTop = state.chatMsgs.scrollHeight;
       }, () => state.cancel, meta);
       this._stopWait(state);
-      bubble.classList.remove("aireader-streaming");
       bubble.textContent = "";
       await this._finishShareText(state, bubble, msg, spec, (res.text || acc || "").trim());
       this.setStatus(state, "", "");
@@ -3143,6 +3167,208 @@ AIReader = {
     open.addEventListener("click", async () => { try { if (!path) path = await this._writeShareFile(state, "html", html); if (!this._openFile(path)) this.setStatus(state, "文件路径：" + path, "muted"); } catch (e) { this.log("open share: " + e); } });
     const copy = mk("复制 HTML");
     copy.addEventListener("click", () => { try { Zotero.Utilities.Internal.copyTextToClipboard(html); copy.textContent = "已复制"; setTimeout(() => (copy.textContent = "复制 HTML"), 1200); } catch (e) {} });
+  },
+
+  // ---------------------------------------------- 全文双语翻译（translate）
+  // Mirrors obsidian src/translate.ts: paragraph-by-paragraph bilingual output.
+  _buildTranslatePrompt(targetLang) {
+    return "你是专业学术翻译。只翻译「待翻译」区里带编号的段落，翻译成" + targetLang + "。严格要求：\n" +
+      "- 逐段翻译，输出每段一行，格式为 [[n]] 译文（n 为原段编号）；不要输出原文、不要加任何说明或标题。\n" +
+      "- 「上文」「下文」区仅供理解上下文与保持术语一致，绝对不要翻译它们、也不要为它们编号输出。\n" +
+      "- 段落编号必须与「待翻译」区一一对应，不得漏段、合并或拆分。\n" +
+      "- 保留数学公式、变量符号、文献引用标记（如 [12]、(Smith et al., 2024)）、以及英文专有名词/模型名/缩写原样（如 Transformer、RLHF、LoRA）。\n" +
+      "- 忠实、通顺，符合" + targetLang + "科技写作习惯，前后术语保持一致。";
+  },
+  _batchPayload(batch, prevUnits, nextUnits) {
+    const parts = [];
+    const prev = prevUnits.map((u) => u.text).join("\n\n").trim();
+    const next = nextUnits.map((u) => u.text).join("\n\n").trim();
+    if (prev) parts.push("【上文（仅供理解，不要翻译）】\n" + prev);
+    parts.push("【待翻译（只翻译下列带编号段落）】\n" + this._numberSegments(batch));
+    if (next) parts.push("【下文（仅供理解，不要翻译）】\n" + next);
+    return parts.join("\n\n");
+  },
+  _neighborContext(units, batches, i, ctx) {
+    const first = batches[i][0], last = batches[i][batches[i].length - 1];
+    const a = units.findIndex((u) => u.n === first.n);
+    const b = units.findIndex((u) => u.n === last.n);
+    return { prev: units.slice(Math.max(0, a - ctx), a), next: units.slice(b + 1, b + 1 + ctx) };
+  },
+  _translatableUnits(blocks) {
+    const out = []; let n = 0;
+    for (const b of blocks || []) {
+      if ((b.type === "paragraph" || b.type === "heading") && b.text && b.text.trim()) out.push({ n: ++n, text: b.text.trim(), heading: b.type === "heading" });
+    }
+    return out;
+  },
+  _batchUnits(units, maxChars) {
+    const batches = []; let cur = [], total = 0;
+    for (const u of units) {
+      const len = u.text.length + 8;
+      if (cur.length && total + len > maxChars) { batches.push(cur); cur = []; total = 0; }
+      cur.push(u); total += len;
+    }
+    if (cur.length) batches.push(cur);
+    return batches;
+  },
+  _numberSegments(units) { return units.map((u) => "[[" + u.n + "]] " + u.text).join("\n\n"); },
+  _parseTranslations(text) {
+    const map = new Map(); const re = /\[\[(\d+)\]\]/g; const hits = []; let m;
+    while ((m = re.exec(text || ""))) hits.push({ n: parseInt(m[1], 10), start: m.index, end: m.index + m[0].length });
+    for (let i = 0; i < hits.length; i++) {
+      const seg = (text || "").slice(hits[i].end, i + 1 < hits.length ? hits[i + 1].start : undefined).trim();
+      if (seg) map.set(hits[i].n, seg);
+    }
+    return map;
+  },
+  _interleaveBilingual(title, units, trans) {
+    const lines = [];
+    if (title) lines.push("# " + title + "（双语对照）", "");
+    for (const u of units) {
+      const t = trans.get(u.n);
+      if (u.heading) { lines.push("## " + u.text); if (t) lines.push("## " + t); lines.push(""); }
+      else { lines.push(u.text); if (t) lines.push("", "> " + t.replace(/\n+/g, "\n> ")); lines.push(""); }
+    }
+    return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  },
+  // Bilingual note HTML (readable inside Zotero): original then translation.
+  _bilingualNoteHTML(title, units, trans) {
+    let html = "<h1>" + this._escapeHTML(title) + "（双语对照）</h1>\n";
+    for (const u of units) {
+      const t = trans.get(u.n);
+      if (u.heading) { html += "<h2>" + this._escapeHTML(u.text) + (t ? " / " + this._escapeHTML(t) : "") + "</h2>\n"; }
+      else { html += "<p>" + this._escapeHTML(u.text) + "</p>\n"; if (t) html += '<p style="color:#1a73e8">' + this._escapeHTML(t) + "</p>\n"; }
+    }
+    return html;
+  },
+  // Standalone bilingual HTML document (saved as a child attachment, opened in
+  // Zotero). Original paragraph + translation beneath it, readable column.
+  _bilingualHtmlDoc(title, units, trans) {
+    const esc = (s) => this._escapeHTML(s);
+    // Translation-forward layout: the (Chinese) translation is the main reading
+    // text; the English source sits above it, smaller & muted, as a reference.
+    let body = "";
+    for (const u of units) {
+      const t = trans.get(u.n);
+      if (u.heading) {
+        body += '<h2>' + esc(t || u.text) + (t ? '<span class="en">' + esc(u.text) + "</span>" : "") + "</h2>\n";
+      } else {
+        body += '<div class="seg"><p class="o">' + esc(u.text) + "</p>" + (t ? '<p class="t">' + esc(t) + "</p>" : "") + "</div>\n";
+      }
+    }
+    const css = [
+      ":root{--fg:#1f2328;--src:#6b7686;--mut:#9aa4b2;--accent:#3b6ea5;--line:#e7e9ee;--bg:#fcfcfb;}",
+      "@media(prefers-color-scheme:dark){:root{--fg:#e6edf3;--src:#8b97a7;--mut:#6b7686;--accent:#6ea8e6;--line:#262b33;--bg:#12151a;}}",
+      "*{box-sizing:border-box;}",
+      "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Segoe UI',sans-serif;font-size:17px;line-height:1.85;color:var(--fg);background:var(--bg);}",
+      ".doc{max-width:760px;margin:0 auto;padding:48px 30px 96px;}",
+      "header.top{margin-bottom:30px;padding-bottom:16px;border-bottom:1px solid var(--line);}",
+      "header.top h1{font-size:1.45em;line-height:1.3;margin:0 0 6px;}",
+      "header.top .sub{color:var(--mut);font-size:.8em;letter-spacing:.02em;}",
+      "h2{font-size:1.2em;line-height:1.4;margin:40px 0 14px;padding-left:13px;border-left:3px solid var(--accent);}",
+      "h2 .en{display:block;color:var(--src);font-size:.62em;font-weight:500;letter-spacing:.01em;margin-top:3px;}",
+      ".seg{margin:0 0 20px;}",
+      "p{margin:0;}",
+      "p.o{color:var(--src);font-size:.86em;line-height:1.55;margin-bottom:4px;}",
+      "p.t{color:var(--fg);}",
+      "::selection{background:rgba(110,168,230,.28);}",
+    ].join("");
+    return "<!DOCTYPE html>\n<html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"/>" +
+      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>" +
+      "<title>" + esc(title) + " · 双语对照</title><style>" + css + "</style></head>" +
+      "<body><div class=\"doc\"><header class=\"top\"><h1>" + esc(title) + "</h1><div class=\"sub\">AI Reader · 双语对照 · 共 " + units.length + " 段</div></header>\n" + body + "</div></body></html>\n";
+  },
+  // Write HTML to a temp file and import it as a stored child attachment of the
+  // current item's parent (syncs through Zotero). Returns the attachment item.
+  async _attachHtml(state, title, html) {
+    let parent = state.item;
+    try { if (parent && parent.isAttachment && parent.isAttachment() && parent.parentItem) parent = parent.parentItem; } catch (e) {}
+    if (!parent || !(parent.isRegularItem && parent.isRegularItem())) return null; // nothing to attach to
+    const dir = PathUtils.join(Zotero.DataDirectory.dir, "aireader", "shares");
+    await IOUtils.makeDirectory(dir, { ignoreExisting: true });
+    const safe = (title || "translation").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80);
+    const path = PathUtils.join(dir, safe + ".html");
+    await IOUtils.writeUTF8(path, html);
+    return await Zotero.Attachments.importFromFile({ file: path, parentItemID: parent.id, title: title, contentType: "text/html" });
+  },
+  _viewAttachment(att) {
+    try { const zp = Zotero.getActiveZoteroPane && Zotero.getActiveZoteroPane(); if (zp && zp.viewAttachment) { zp.viewAttachment([att.id]); return; } } catch (e) {}
+    try { const p = att.getFilePath && att.getFilePath(); if (p) this._openFile(p); } catch (e) { this.log("viewAttachment: " + e); }
+  },
+  async generateTranslation(body) {
+    const state = this._bodyState.get(body);
+    if (!state || !state.attachment) return;
+    if (!this.requireKey(state)) return;
+    if (state.streaming) return;
+    this.appendUserMsg(state, "🌐 全文翻译");
+    const { msg, bubble } = this.appendAssistantMsg(state);
+    state.streaming = true; state.cancel = false; this.updateSendButton(state);
+    try {
+      await this.ensureBlocks(state);
+      const units = this._translatableUnits(state.blocks);
+      if (!units.length) { bubble.textContent = "没有可翻译的正文段落。"; return; }
+      const target = this.getPref("language") || "中文";
+      const batches = this._batchUnits(units, 5000);
+      // Friendly progress: a determinate bar + "已完成 X / 总 段（%）", per batch.
+      bubble.textContent = "";
+      const label = this._el(state.doc, "div", "aireader-trans-label"); bubble.appendChild(label);
+      const barOuter = this._el(state.doc, "div", "aireader-progress"); const barFill = this._el(state.doc, "div", "aireader-progress-fill"); barOuter.appendChild(barFill); bubble.appendChild(barOuter);
+      const limit = Math.max(1, Math.min(8, Number(this.getPref("maxParallelTools")) || 3));
+      let doneU = 0;
+      const paint = () => { const pct = Math.round((doneU / units.length) * 100); barFill.style.width = pct + "%"; label.textContent = "翻译中… 已完成 " + doneU + " / " + units.length + " 段（" + pct + "%）· 并发 " + limit; };
+      paint();
+      this.setStatus(state, "翻译中…", "busy");
+      const trans = new Map();
+      // Bounded-concurrency pool; each batch carries read-only neighbor context so
+      // cross-boundary references & terminology stay consistent despite parallelism.
+      let nextI = 0;
+      const worker = async () => {
+        while (!state.cancel) {
+          const i = nextI++; if (i >= batches.length) break;
+          try {
+            const nc = this._neighborContext(units, batches, i, 2);
+            const res = await this._streamAnswer(
+              [{ role: "system", content: this._buildTranslatePrompt(target) }, { role: "user", content: this._batchPayload(batches[i], nc.prev, nc.next) }],
+              null, () => {}, () => state.cancel, {},
+            );
+            for (const [n, t] of this._parseTranslations(res.text || "")) trans.set(n, t);
+          } catch (e) { this.log("trans batch " + i + ": " + e); }
+          doneU += batches[i].length; paint();
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(limit, batches.length) }, () => worker()));
+      if (state.cancel) { bubble.textContent = "（已停止）"; return; }
+      const title = this._shareBaseName(state);
+      const md = this._interleaveBilingual(title, units, trans);
+      // Deliver the bilingual result as a CHILD ATTACHMENT (like zotero-pdf2zh):
+      // a standalone HTML file under the item, opens in Zotero and syncs — instead
+      // of polluting the item's notes.
+      this.setStatus(state, "正在保存双语文档…", "busy");
+      const html = this._bilingualHtmlDoc(title, units, trans);
+      let att = null;
+      try { att = await this._attachHtml(state, title + " · 双语对照", html); } catch (e) { this.log("attach bilingual: " + e); }
+      bubble.textContent = "";
+      const row = this._el(state.doc, "div", "aireader-actions"); msg.appendChild(row);
+      const mk = (lbl) => { const a = this._el(state.doc, "span", "aireader-action", lbl); row.appendChild(a); return a; };
+      if (att) {
+        bubble.appendChild(this._el(state.doc, "div", "aireader-meta", "双语对照已生成（" + units.length + " 段），已作为子附件「" + title + " · 双语对照」挂到本条目，可在条目下打开。"));
+        const open = mk("打开");
+        open.addEventListener("click", () => this._viewAttachment(att));
+      } else {
+        // fallback: no parent item to attach to → offer file save
+        bubble.appendChild(this._el(state.doc, "div", "aireader-meta", "双语对照已生成（" + units.length + " 段）。"));
+        const save = mk("保存到文件");
+        save.addEventListener("click", async () => { save.textContent = "保存中…"; try { const p = await this._writeShareFile(state, "双语.html", html); this._openFile(p); save.textContent = "✓ 已保存"; } catch (e) { save.textContent = "保存失败"; } });
+      }
+      const copy = mk("复制文本");
+      copy.addEventListener("click", () => { try { Zotero.Utilities.Internal.copyTextToClipboard(md); copy.textContent = "已复制"; setTimeout(() => (copy.textContent = "复制文本"), 1200); } catch (e) {} });
+      this.setStatus(state, "", "");
+    } catch (e) {
+      bubble.textContent = state.cancel ? "（已停止）" : this._friendlyError(e);
+      this.log("generateTranslation error: " + e);
+    } finally {
+      this._stopWait(state); state.streaming = false; this.updateSendButton(state);
+    }
   },
 
   _noteFooter() {
@@ -3329,7 +3555,8 @@ AIReader = {
     if (/http 429|rate.?limit|too many requests|quota/.test(m)) return tip("触发限流或额度不足。稍等再试，或换一个 Key / 模型。");
     if (/http 5\d\d|internal server|bad gateway|service unavailable|overloaded/.test(m)) return tip("服务端出错（5xx），通常是对面临时故障，稍后重试。");
     if (/network|failed to fetch|fetch failed|enotfound|econnrefused|socket hang|dns|网络请求失败/.test(m)) return tip("连不上接口。检查网络、Base URL 是否正确、是否需要代理。");
-    if (/非 json|not json|unexpected token|无法从响应|无法提取结构化文本/.test(m)) return tip("返回的内容不是预期格式。多半是 Base URL 或「接口格式」选错了（比如给 OpenAI 服务选了 Anthropic 格式）。");
+    if (/无法提取结构化文本|无法提取正文|没有可翻译/.test(raw)) return tip("读不出这个文档的正文。扫描版/图片 PDF 需要先 OCR；网页快照/EPub 等非 PDF 附件可能不受支持。");
+    if (/非 json|not json|unexpected token|无法从响应/.test(m)) return tip("返回的内容不是预期格式。多半是 Base URL 或「接口格式」选错了（比如给 OpenAI 服务选了 Anthropic 格式）。");
     return raw;
   },
   _parseOrThrow(raw) { try { return JSON.parse(raw); } catch (e) { throw new Error("响应不是 JSON（Base URL 或 API 格式可能不对）。实际返回：\n" + (raw || "").slice(0, 1200)); } },

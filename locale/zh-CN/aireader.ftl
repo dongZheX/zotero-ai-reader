@@ -2,6 +2,8 @@ aireader-section-header =
     .label = AI 阅读
 aireader-section-sidenav =
     .tooltiptext = AI 阅读
+aireader-section-settings =
+    .tooltiptext = 设置
 
 aireader-generate = 生成总结
 aireader-settings = 设置

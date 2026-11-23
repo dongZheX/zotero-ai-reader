@@ -1051,6 +1051,27 @@ const A=ctx.AIReader; A.init({id:'ai@x',version:'0.3.0',rootURI:'file:///p/'});
    console.log('share-material generator (formats + embed + wrap + outline): OK');
  }
 
+ // ---- full-text bilingual translation ----
+ { const tblocks=[{id:0,type:'heading',text:'Title'},{id:1,type:'paragraph',text:'The model works well.'},{id:2,type:'heading',text:'Method'},{id:3,type:'paragraph',text:'We use a transformer.'},{id:4,type:'image',text:'fig'}];
+   const units=A._translatableUnits(tblocks);
+   assert(units.length===4 && units.every((u,i)=>u.n===i+1),'_translatableUnits numbers paragraphs+headings, skips image');
+   assert(units.some(u=>u.heading),'headings flagged');
+   const seg=A._numberSegments(units.slice(0,2));
+   assert(/\[\[1\]\]/.test(seg)&&/\[\[2\]\]/.test(seg),'_numberSegments tags each unit');
+   const tr=A._parseTranslations('好的：\n[[1]] 标题\n[[2]] 模型\n效果很好\n[[3]] 方法');
+   assert(tr.get(1)==='标题'&&tr.get(3)==='方法'&&/模型/.test(tr.get(2))&&/效果很好/.test(tr.get(2)),'_parseTranslations maps n→译文 (multi-line safe)');
+   const bi=A._interleaveBilingual('T',units,tr);
+   assert(/# T（双语对照）/.test(bi)&&/> /.test(bi),'_interleaveBilingual adds title + blockquote translation');
+   const bi2=A._interleaveBilingual('T',units,new Map());
+   assert(bi2.includes(units[1].text)&&!/> /.test(bi2),'_interleaveBilingual falls back to original-only');
+   const noteHTML=A._bilingualNoteHTML('T',units,tr);
+   assert(/<h1>/.test(noteHTML)&&/<p>The model works well\.<\/p>/.test(noteHTML)&&/color:#1a73e8/.test(noteHTML),'_bilingualNoteHTML pairs original + colored translation');
+   const batches=A._batchUnits(units,30);
+   assert(batches.length>=2 && batches.reduce((n,b)=>n+b.length,0)===units.length,'_batchUnits splits by budget, keeps all');
+   assert(/翻译/.test(A._buildTranslatePrompt('中文'))&&/\[\[n\]\]/.test(A._buildTranslatePrompt('中文')),'translate prompt states target + numbered format');
+   console.log('full-text bilingual translation: OK');
+ }
+
  // ---- layout safety net: assistant bubbles must constrain every descendant so
  // long URLs / English tool briefs / wide artifacts can't overflow the panel ----
  { const css=fs.readFileSync(path.join(__dirname,'..','content','style.css'),'utf8').replace(/\s+/g,' ');

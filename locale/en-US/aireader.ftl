@@ -2,6 +2,8 @@ aireader-section-header =
     .label = AI Reader
 aireader-section-sidenav =
     .tooltiptext = AI Reader
+aireader-section-settings =
+    .tooltiptext = Settings
 
 aireader-generate = Summarize
 aireader-settings = Settings
