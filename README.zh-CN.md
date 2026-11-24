@@ -33,13 +33,7 @@ Zotero 条目面板侧栏里的一个对话框。选中一篇论文就能提问�
 
 ### 演示
 
-<div align="center">
-
-<video src="https://github.com/dongZheX/zotero-ai-reader/releases/download/v0.10.1/demo.mp4" controls muted width="720"></video>
-
-<sub>播放器加载不出时，<a href="https://github.com/dongZheX/zotero-ai-reader/releases/download/v0.10.1/demo.mp4">▶ 点此观看演示</a>。</sub>
-
-</div>
+https://github.com/user-attachments/assets/2503e82e-5289-42d1-a6e0-51cf5076695e
 
 ## 功能
 

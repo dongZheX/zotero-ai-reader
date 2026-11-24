@@ -33,13 +33,7 @@ Two things set it apart from a plain chat box:
 
 ### Demo
 
-<div align="center">
-
-<video src="https://github.com/dongZheX/zotero-ai-reader/releases/download/v0.10.1/demo.mp4" controls muted width="720"></video>
-
-<sub><a href="https://github.com/dongZheX/zotero-ai-reader/releases/download/v0.10.1/demo.mp4">▶ Watch the demo</a> if the player doesn't load.</sub>
-
-</div>
+https://github.com/user-attachments/assets/2503e82e-5289-42d1-a6e0-51cf5076695e
 
 ## Features
 
