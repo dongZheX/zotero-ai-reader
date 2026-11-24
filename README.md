@@ -74,7 +74,7 @@ Open **Settings → AI Reader**:
 | API Key | Your key. |
 | Model | e.g. `gpt-5`, `deepseek-chat`, `claude-opus-5-5`. |
 | Output language | 中文 / English / 日本語. |
-| Temperature | Sampling temperature. |
+| Temperature | Sampling temperature. **Leave blank to use the model's default** — only sent when you enter a value (some models, e.g. GPT reasoning models, reject a custom temperature). |
 | Max characters | Upper bound on injected body text. |
 | Max output tokens | `0` = no limit. |
 | Parallel tools | Read-only tool calls run up to this many at once; set `1` if your API rejects parallel requests. |

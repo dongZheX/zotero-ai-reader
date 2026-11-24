@@ -37,6 +37,17 @@ AIReader = {
   getPref(key) { return Zotero.Prefs.get("aireader." + key); },
   log(msg) { Zotero.debug("[AIReader] " + msg); },
 
+  // Temperature is OPT-IN: only sent when the user entered a value. Empty/blank
+  // means "use the model's default" and the field is omitted entirely — some
+  // models (OpenAI reasoning models like gpt-5 / o-series on /responses) reject
+  // any non-default temperature, so sending our own default would error.
+  _temperature() {
+    const raw = (this.getPref("temperature") == null ? "" : this.getPref("temperature")).toString().trim();
+    if (raw === "") return null;
+    const t = parseFloat(raw);
+    return isNaN(t) ? null : t;
+  },
+
   // Reading skills: each is a method injected into the system prompt + its own
   // quick chips. Switching a skill swaps the chips and the injected guidance.
   // Sources: deer-flow academic-paper-review / systematic-literature-review,
@@ -2103,13 +2114,14 @@ AIReader = {
   },
   _toolBody(fmt, messages, tools, stream) {
     const model = this.getPref("model");
-    const t = parseFloat(this.getPref("temperature")); const temp = isNaN(t) ? 0.3 : t;
+    const temp = this._temperature(); // null → omit (use model default)
     const mtRaw = parseInt(this.getPref("maxTokens"), 10); const maxTok = isNaN(mtRaw) || mtRaw <= 0 ? 0 : mtRaw;
     const hasTools = Array.isArray(tools) && tools.length > 0;
     if (fmt === "anthropic") {
       const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
       const msgs = this._anthropicCacheMsgs(messages.filter((m) => m.role !== "system"));
-      const body = { model, messages: msgs, max_tokens: maxTok || 32000, temperature: temp, stream: !!stream };
+      const body = { model, messages: msgs, max_tokens: maxTok || 32000, stream: !!stream };
+      if (temp != null) body.temperature = temp;
       if (hasTools) body.tools = tools;
       // Cache the large, stable system prompt (paper context) so multi-turn
       // requests on the same paper hit the prompt cache instead of re-billing it.
@@ -2117,12 +2129,14 @@ AIReader = {
       return JSON.stringify(body);
     }
     if (fmt === "responses") {
-      const body = { model, input: messages, temperature: temp, stream: !!stream };
+      const body = { model, input: messages, stream: !!stream };
+      if (temp != null) body.temperature = temp;
       if (hasTools) { body.tools = tools; body.tool_choice = "auto"; }
       if (maxTok) body.max_output_tokens = maxTok;
       return JSON.stringify(body);
     }
-    const body = { model, messages, temperature: temp, stream: !!stream };
+    const body = { model, messages, stream: !!stream };
+    if (temp != null) body.temperature = temp;
     if (hasTools) { body.tools = tools; body.tool_choice = "auto"; }
     if (maxTok) body.max_tokens = maxTok;
     if (stream) body.stream_options = { include_usage: true };
@@ -3694,12 +3708,13 @@ AIReader = {
   _headersFor(fmt) { const key = this.getPref("apiKey"); if (fmt === "anthropic") return { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }; return { "Content-Type": "application/json", Authorization: "Bearer " + key }; },
   _bodyFor(fmt, messages, stream) {
     const model = this.getPref("model");
-    const t = parseFloat(this.getPref("temperature")); const temp = isNaN(t) ? 0.3 : t;
+    const temp = this._temperature(); // null → omit (use model default)
     // maxTokens: 0 (or unset) => do not cap (Anthropic requires the field, so use a generous fallback).
     const mtRaw = parseInt(this.getPref("maxTokens"), 10);
     const maxTok = isNaN(mtRaw) || mtRaw <= 0 ? 0 : mtRaw;
     if (fmt === "responses") {
-      const body = { model, input: messages, temperature: temp, stream: !!stream };
+      const body = { model, input: messages, stream: !!stream };
+      if (temp != null) body.temperature = temp;
       if (maxTok) body.max_output_tokens = maxTok;
       return JSON.stringify(body);
     }
@@ -3707,11 +3722,13 @@ AIReader = {
       const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
       const msgs = this._anthropicCacheMsgs(messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content })));
       // Anthropic requires max_tokens; when uncapped, request a large ceiling so answers aren't truncated.
-      const body = { model, messages: msgs, max_tokens: maxTok || 32000, temperature: temp, stream: !!stream };
+      const body = { model, messages: msgs, max_tokens: maxTok || 32000, stream: !!stream };
+      if (temp != null) body.temperature = temp;
       if (system) body.system = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
       return JSON.stringify(body);
     }
-    const body = { model, messages, temperature: temp, stream: !!stream };
+    const body = { model, messages, stream: !!stream };
+    if (temp != null) body.temperature = temp;
     if (maxTok) body.max_tokens = maxTok;
     if (stream) body.stream_options = { include_usage: true }; // OpenAI usage in final chunk
     return JSON.stringify(body);

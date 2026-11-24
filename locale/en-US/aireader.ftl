@@ -24,6 +24,7 @@ aireader-prefs-apikey = API Key
 aireader-prefs-model = Model
 aireader-prefs-language = Output language
 aireader-prefs-temperature = Temperature
+aireader-prefs-temperature-hint = Leave blank to use the model's default (required for some models, e.g. GPT reasoning models).
 aireader-prefs-maxchars = Max characters sent
 aireader-prefs-maxtokens = Max output tokens (0 = unlimited)
 aireader-prefs-test = Test connection

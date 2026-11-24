@@ -24,6 +24,7 @@ aireader-prefs-apikey = API 密钥
 aireader-prefs-model = 模型名称
 aireader-prefs-language = 输出语言
 aireader-prefs-temperature = 温度 (temperature)
+aireader-prefs-temperature-hint = 留空则用模型默认温度（部分模型如 GPT 推理模型必须留空，否则会报错）。
 aireader-prefs-maxchars = 最大发送字符数
 aireader-prefs-maxtokens = 最大输出 token（0 = 不限制）
 aireader-prefs-test = 测试连接
