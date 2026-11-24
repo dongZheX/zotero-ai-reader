@@ -18,6 +18,8 @@
 
 ---
 
+https://github.com/user-attachments/assets/2503e82e-5289-42d1-a6e0-51cf5076695e
+
 ## What it is
 
 A chat panel in Zotero's item-pane sidebar. Select a paper and ask about it; the paper's text goes to the model as context, so answers come from the document rather than the model's memory.
@@ -30,10 +32,6 @@ Two things set it apart from a plain chat box:
 <div align="center">
 <img src="assets/ui-preview.svg" alt="AI Reader panel" width="560"/>
 </div>
-
-### Demo
-
-https://github.com/user-attachments/assets/2503e82e-5289-42d1-a6e0-51cf5076695e
 
 ## Features
 

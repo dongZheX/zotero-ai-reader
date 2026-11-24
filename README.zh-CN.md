@@ -18,6 +18,8 @@
 
 ---
 
+https://github.com/user-attachments/assets/2503e82e-5289-42d1-a6e0-51cf5076695e
+
 ## 这是什么
 
 Zotero 条目面板侧栏里的一个对话框。选中一篇论文就能提问，论文正文作为上下文发给模型，所以回答基于文档本身，而不是模型的印象。
@@ -30,10 +32,6 @@ Zotero 条目面板侧栏里的一个对话框。选中一篇论文就能提问�
 <div align="center">
 <img src="assets/ui-preview.svg" alt="AI Reader 面板" width="560"/>
 </div>
-
-### 演示
-
-https://github.com/user-attachments/assets/2503e82e-5289-42d1-a6e0-51cf5076695e
 
 ## 功能
 
