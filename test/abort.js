@@ -27,10 +27,7 @@ const ctx = {
   AbortController, fetch: hangingFetch, PathUtils: {}, IOUtils: {},
   console, setTimeout, setInterval, clearInterval, TextDecoder, TextEncoder,
 };
-ctx.AIReader = undefined;
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'content', 'aireader.js'), 'utf8'), ctx, { filename: 'aireader.js' });
-const A = ctx.AIReader;
+const A = require('./_load').loadInto(ctx);
 
 (async () => {
   // 1) guard signal starts open, aborts when shouldStop() flips, dispose() stops poller

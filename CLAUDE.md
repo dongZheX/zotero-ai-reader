@@ -1,8 +1,13 @@
 # AI Reader — developer notes
 
-A Zotero 7/8/10/11 bootstrap plugin. The item-pane section lives in
-`content/aireader.js` (one big `AIReader` object), styled by `content/style.css`.
-Tests are a headless Node simulation in `test/sim.js`.
+A Zotero 7/8/10/11 bootstrap plugin. The plugin is one global `AIReader` object
+split across domain modules under `content/`: `aireader.js` (core seed —
+lifecycle / registration / dev bridge / item logic / micro-utils) loads first,
+then `net` · `prompts` · `share` · `blocks` · `annotate` · `tools` · `chat` ·
+`ui` each `Object.assign(AIReader, {…})` onto it (wired in `bootstrap.js`, in
+that order; cross-module calls are plain `this.*`). Styled by
+`content/style.css`. Automated safety net: a golden snapshot (`test/golden.js`)
+plus focused Node tests.
 
 ## Workflow (read before committing)
 
@@ -10,8 +15,11 @@ Tests are a headless Node simulation in `test/sim.js`.
   rebuild the `.xpi` with the version **unchanged**; do not bump the version and
   do not push. Only when the user confirms do you bump `manifest.json`, commit,
   and push. Version releases go directly to `main`.
-- **Tests must pass.** `node test/sim.js` must print `ALL OK`. Add assertions
-  there for any new behavior — it's the only automated safety net.
+- **Tests must pass.** `node test/golden.js` must print `GOLDEN OK` (a byte-
+  identical snapshot of every deterministic builder — the zero-diff net for
+  refactors) and `node test/{share,snapshot,temperature,abort,retry}.js` must all
+  pass. Add snapshot keys / assertions for any new behavior. When you add a new
+  `content/*.js` module, append it to `test/_load.js` (the shared load order).
 - **Scan for secrets before every commit.** Never commit an API key / AK-SK.
   ```bash
   grep -rnEi "sk-[A-Za-z0-9]{20,}" . --exclude-dir=.git   # + any internal gateway key fragments
@@ -20,7 +28,17 @@ Tests are a headless Node simulation in `test/sim.js`.
   ```bash
   zip -r -q ai-reader.xpi manifest.json bootstrap.js prefs.js content locale
   ```
-- **Syntax check:** `node --check content/aireader.js`.
+  The HTML share engines are built on two open-source skills (frontend-slides
+  MIT, paper-craft by permission). We keep the footprint minimal: the ONE thing
+  that must ship verbatim is the real presentation runtime
+  `content/vendor/deck-stage.js` (vendored like marked/katex; inlined into
+  generated decks — read at runtime via `rootURI`, which is a `jar:` URL, so use
+  `fetch()`/sync `Zotero.File.getContentsFromURL`, NOT `getContentsFromURLAsync`
+  — see `_deckRuntime`). Everything else a skill contributes (deck color/font
+  presets, slide-authoring rules, paper-craft writing voices) is **maintained by
+  us** in `content/prompts.js` (`_deckPresets` / `_articleVoices` + the share and
+  deck prompt builders), loaded by `bootstrap.js` after `aireader.js`.
+- **Syntax check:** `node --check content/*.js`.
 
 ## Pitfalls hit during development (don't relearn these)
 

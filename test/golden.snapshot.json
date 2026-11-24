@@ -1,0 +1,391 @@
+{
+  "articleCss": "*{box-sizing:border-box;margin:0;padding:0;}\n:root{--maxw:1040px;--radius:14px;--gap:24px;--paper:#faf7f2;--surface:#fffdf9;--ink:#1e2430;--muted:#6b6256;--accent:#9a3412;--on-accent:#fff;--accent-soft:#f6ece1;--border:#e7ddcd;--mark:#fde68a;--ok:#15803d;--bad:#b91c1c;--code-bg:#f4efe6;--shadow-1:0 1px 2px rgba(30,20,10,.05),0 2px 10px rgba(30,20,10,.04);--font-head:Georgia,'Times New Roman','Songti SC',serif;--font-body:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;--font-mono:'SF Mono',ui-monospace,Consolas,monospace;}\nhtml{-webkit-text-size-adjust:100%;}\nbody{font-family:var(--font-body);line-height:1.75;color:var(--ink);background:var(--paper);padding:clamp(16px,4vw,40px);min-height:100vh;}\n@supports (text-wrap:pretty){body{text-wrap:pretty;}}\n.container{max-width:var(--maxw);margin:0 auto;}\nheader{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(24px,5vw,44px);margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\nheader h1{font-family:var(--font-head);font-weight:800;font-size:clamp(1.65rem,4.2vw,2.5rem);line-height:1.2;letter-spacing:-.01em;color:var(--ink);}\n.paper-authors{color:var(--muted);margin-top:12px;font-size:.98rem;line-height:1.6;}\n.paper-venue{color:var(--accent);font-weight:600;margin-top:4px;font-size:.95rem;}\n.paper-badges{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;}\n.paper-badges a{text-decoration:none;font-size:.8rem;font-weight:600;padding:5px 13px;border-radius:999px;border:1px solid var(--accent);color:var(--accent);background:transparent;transition:background .15s ease,color .15s ease;}\n.paper-badges a:hover{background:var(--accent);color:var(--on-accent);}\n.tldr{margin-top:18px;font-size:1.06rem;color:var(--ink);font-weight:500;}\n.tags{margin-top:12px;} .tag{display:inline-block;background:var(--accent-soft);color:var(--accent);padding:3px 11px;border-radius:999px;margin:4px 6px 0 0;font-size:.8rem;font-weight:600;}\n.paper-abstract{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);font-size:.95rem;color:var(--ink);}\n.paper-abstract .lbl,.toc .lbl{display:block;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}\n.toc{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 26px;margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\n.toc ul{list-style:none;} .toc li{padding:5px 0;border-bottom:1px solid var(--border);} .toc li:last-child{border-bottom:none;} .toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid transparent;} .toc a:hover{color:var(--accent);border-bottom-color:var(--accent);}\nsection{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(22px,4vw,38px);margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\nh2{font-family:var(--font-head);font-size:clamp(1.3rem,3vw,1.72rem);color:var(--ink);margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid var(--accent);}\nh3{font-size:1.2rem;color:var(--ink);margin:22px 0 10px;font-weight:700;}\nh4{color:var(--accent);margin:16px 0 8px;font-size:1rem;font-weight:700;}\np{margin-bottom:12px;} ul,ol{padding-left:22px;margin-bottom:12px;} li{margin:5px 0;} a{color:var(--accent);} strong{color:var(--ink);}\ncode{background:var(--code-bg);color:var(--accent);padding:2px 7px;border-radius:5px;font-family:var(--font-mono);font-size:.9em;}\ntable{width:100%;border-collapse:collapse;margin:16px 0;font-size:.94em;} th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);} th{background:var(--accent-soft);font-weight:700;color:var(--ink);}\n.pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;} .pros,.cons{padding:18px 20px;border-radius:10px;border:1px solid var(--border);} .pros{background:color-mix(in srgb,var(--ok) 9%,transparent);border-color:color-mix(in srgb,var(--ok) 30%,var(--border));} .cons{background:color-mix(in srgb,var(--bad) 9%,transparent);border-color:color-mix(in srgb,var(--bad) 30%,var(--border));}\n.pros h4{color:var(--ok);margin-top:0;} .cons h4{color:var(--bad);margin-top:0;}\n.qa{background:var(--accent-soft);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin:14px 0;} .qa .q{font-weight:700;color:var(--ink);margin-bottom:8px;} .qa .q::before{content:'Q ';color:var(--accent);font-weight:800;} .qa .a{color:var(--ink);padding-left:14px;border-left:3px solid var(--accent);} .qa .a::before{content:'A ';font-weight:800;color:var(--accent);}\n.highlight{background:linear-gradient(transparent 62%,var(--mark) 0);padding:0 2px;}\n.lead{font-size:1.08rem;font-weight:600;color:var(--ink);margin:0 0 16px;padding:8px 0 8px 16px;border-left:4px solid var(--accent);}\n.callout{background:var(--accent-soft);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px;padding:14px 18px;margin:16px 0;color:var(--ink);} .callout strong,.callout b{color:var(--accent);}\n.dim{font-family:var(--font-mono);font-size:.86em;background:var(--code-bg);border:1px dashed var(--border);padding:12px 18px;border-radius:8px;margin:10px 0;white-space:pre-wrap;line-height:1.7;color:var(--muted);}\n.svg-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin:18px 0;overflow-x:auto;box-shadow:var(--shadow-1);} .svg-wrap .caption{text-align:center;color:var(--muted);font-size:.86em;margin-top:10px;}\nsvg{display:block;margin:0 auto;max-width:100%;height:auto;}\n.paper-fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin:18px 0;box-shadow:var(--shadow-1);} .paper-fig img{display:block;max-width:100%;height:auto;margin:0 auto;border-radius:6px;} .paper-fig .caption{text-align:center;color:var(--muted);font-size:.88em;margin-top:12px;}\nfooter{text-align:center;color:var(--muted);font-size:.82em;margin:8px 0 0;}\n@media (max-width:768px){.pros-cons{grid-template-columns:1fr;}}\n@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important;}}\nbody{padding:0;}\n.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:clamp(24px,4vw,48px);max-width:1260px;margin:0 auto;padding:clamp(16px,3vw,36px);align-items:start;}\n.sidenav{position:sticky;top:16px;align-self:start;max-height:calc(100vh - 32px);overflow-y:auto;padding:4px 6px 20px 0;}\n.sidenav .lbl{display:block;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:6px 0 12px 12px;}\n.sidenav ul{list-style:none;} .sidenav li{margin:0;border:none;padding:0;}\n.sidenav a{display:block;padding:7px 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:.9rem;line-height:1.4;border-left:2px solid transparent;transition:color .15s,background .15s;}\n.sidenav a:hover{color:var(--accent);}\n.sidenav a.active{color:var(--accent);background:var(--accent-soft);border-left-color:var(--accent);font-weight:600;}\n.content{min-width:0;} .content>section{scroll-margin-top:16px;} .content>header{scroll-margin-top:16px;}\n@media (max-width:900px){.layout{grid-template-columns:1fr;} .sidenav{position:static;max-height:none;overflow:visible;border-bottom:1px solid var(--border);margin-bottom:12px;padding-bottom:12px;}}\n@media (prefers-color-scheme:dark){:root{--paper:#0f1216;--surface:#171b22;--ink:#e6ecf3;--muted:#98a4b5;--border:#2a313c;--code-bg:#1c222b;--accent-soft:color-mix(in srgb,var(--accent) 16%,#171b22);--shadow-1:0 1px 2px rgba(0,0,0,.4),0 2px 12px rgba(0,0,0,.35);}}",
+  "articleLayoutCss": "body{padding:0;}\n.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:clamp(24px,4vw,48px);max-width:1260px;margin:0 auto;padding:clamp(16px,3vw,36px);align-items:start;}\n.sidenav{position:sticky;top:16px;align-self:start;max-height:calc(100vh - 32px);overflow-y:auto;padding:4px 6px 20px 0;}\n.sidenav .lbl{display:block;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:6px 0 12px 12px;}\n.sidenav ul{list-style:none;} .sidenav li{margin:0;border:none;padding:0;}\n.sidenav a{display:block;padding:7px 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:.9rem;line-height:1.4;border-left:2px solid transparent;transition:color .15s,background .15s;}\n.sidenav a:hover{color:var(--accent);}\n.sidenav a.active{color:var(--accent);background:var(--accent-soft);border-left-color:var(--accent);font-weight:600;}\n.content{min-width:0;} .content>section{scroll-margin-top:16px;} .content>header{scroll-margin-top:16px;}\n@media (max-width:900px){.layout{grid-template-columns:1fr;} .sidenav{position:static;max-height:none;overflow:visible;border-bottom:1px solid var(--border);margin-bottom:12px;padding-bottom:12px;}}",
+  "articleScrollspyJs": "(function(){\n var links=[].slice.call(document.querySelectorAll('.sidenav a[href^=\"#\"]'));\n var map={}; links.forEach(function(a){var id=decodeURIComponent(a.getAttribute('href').slice(1)); map[id]=a;\n  a.addEventListener('click',function(e){var t=document.getElementById(id); if(t){e.preventDefault(); t.scrollIntoView({behavior:'smooth',block:'start'});}});});\n var secs=[].slice.call(document.querySelectorAll('.content section[id], .content header[id]'));\n if(!('IntersectionObserver' in window)||!secs.length) return;\n var io=new IntersectionObserver(function(ents){ents.forEach(function(en){ if(en.isIntersecting){var id=en.target.id; links.forEach(function(a){a.classList.remove('active');}); if(map[id])map[id].classList.add('active');}});},{rootMargin:'-15% 0px -75% 0px',threshold:0});\n secs.forEach(function(s){io.observe(s);});\n})();",
+  "articleVoices": {
+    "academic": "\n\n【写作风格 · 学术（paper-craft academic）】比论文更清晰的深度解析：术语准确不过度简化；准确引用论文定义与公式（有公式用 $…$/$$…$$）、引用图表标 Figure 号；客观陈述、少主观；结构 摘要→背景与动机→方法→实验→分析→结论，每节有明确技术目标，强调与相关工作对比；篇幅充分、论证扎实。",
+    "concise": "\n\n【写作风格 · 精炼（paper-craft concise）】直给要点、结论先行、少铺陈：多用列表/对比表/速问速答承载信息，不写大段；每节只留最能说明问题的几个数字与结论。",
+    "storytelling": "\n\n【写作风格 · 故事（paper-craft storytelling）】像一篇好读的深度公众号：钩子开头(反常识/共鸣场景，先让人好奇再讲技术)；多用“你”与读者对话；段落短(≤4 句)；技术词立刻给“人话解释”；关键处配类比；数据翻译成可感知的东西；结尾回到开头形成闭环 + 一句能被转述的金句。"
+  },
+  "assembleArticle": "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"UTF-8\"/>\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>\n<meta name=\"color-scheme\" content=\"light dark\"/>\n<title>T</title>\n<style>\n*{box-sizing:border-box;margin:0;padding:0;}\n:root{--maxw:1040px;--radius:14px;--gap:24px;--paper:#faf7f2;--surface:#fffdf9;--ink:#1e2430;--muted:#6b6256;--accent:#9a3412;--on-accent:#fff;--accent-soft:#f6ece1;--border:#e7ddcd;--mark:#fde68a;--ok:#15803d;--bad:#b91c1c;--code-bg:#f4efe6;--shadow-1:0 1px 2px rgba(30,20,10,.05),0 2px 10px rgba(30,20,10,.04);--font-head:Georgia,'Times New Roman','Songti SC',serif;--font-body:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;--font-mono:'SF Mono',ui-monospace,Consolas,monospace;}\nhtml{-webkit-text-size-adjust:100%;}\nbody{font-family:var(--font-body);line-height:1.75;color:var(--ink);background:var(--paper);padding:clamp(16px,4vw,40px);min-height:100vh;}\n@supports (text-wrap:pretty){body{text-wrap:pretty;}}\n.container{max-width:var(--maxw);margin:0 auto;}\nheader{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(24px,5vw,44px);margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\nheader h1{font-family:var(--font-head);font-weight:800;font-size:clamp(1.65rem,4.2vw,2.5rem);line-height:1.2;letter-spacing:-.01em;color:var(--ink);}\n.paper-authors{color:var(--muted);margin-top:12px;font-size:.98rem;line-height:1.6;}\n.paper-venue{color:var(--accent);font-weight:600;margin-top:4px;font-size:.95rem;}\n.paper-badges{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;}\n.paper-badges a{text-decoration:none;font-size:.8rem;font-weight:600;padding:5px 13px;border-radius:999px;border:1px solid var(--accent);color:var(--accent);background:transparent;transition:background .15s ease,color .15s ease;}\n.paper-badges a:hover{background:var(--accent);color:var(--on-accent);}\n.tldr{margin-top:18px;font-size:1.06rem;color:var(--ink);font-weight:500;}\n.tags{margin-top:12px;} .tag{display:inline-block;background:var(--accent-soft);color:var(--accent);padding:3px 11px;border-radius:999px;margin:4px 6px 0 0;font-size:.8rem;font-weight:600;}\n.paper-abstract{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);font-size:.95rem;color:var(--ink);}\n.paper-abstract .lbl,.toc .lbl{display:block;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}\n.toc{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 26px;margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\n.toc ul{list-style:none;} .toc li{padding:5px 0;border-bottom:1px solid var(--border);} .toc li:last-child{border-bottom:none;} .toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid transparent;} .toc a:hover{color:var(--accent);border-bottom-color:var(--accent);}\nsection{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(22px,4vw,38px);margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\nh2{font-family:var(--font-head);font-size:clamp(1.3rem,3vw,1.72rem);color:var(--ink);margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid var(--accent);}\nh3{font-size:1.2rem;color:var(--ink);margin:22px 0 10px;font-weight:700;}\nh4{color:var(--accent);margin:16px 0 8px;font-size:1rem;font-weight:700;}\np{margin-bottom:12px;} ul,ol{padding-left:22px;margin-bottom:12px;} li{margin:5px 0;} a{color:var(--accent);} strong{color:var(--ink);}\ncode{background:var(--code-bg);color:var(--accent);padding:2px 7px;border-radius:5px;font-family:var(--font-mono);font-size:.9em;}\ntable{width:100%;border-collapse:collapse;margin:16px 0;font-size:.94em;} th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);} th{background:var(--accent-soft);font-weight:700;color:var(--ink);}\n.pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;} .pros,.cons{padding:18px 20px;border-radius:10px;border:1px solid var(--border);} .pros{background:color-mix(in srgb,var(--ok) 9%,transparent);border-color:color-mix(in srgb,var(--ok) 30%,var(--border));} .cons{background:color-mix(in srgb,var(--bad) 9%,transparent);border-color:color-mix(in srgb,var(--bad) 30%,var(--border));}\n.pros h4{color:var(--ok);margin-top:0;} .cons h4{color:var(--bad);margin-top:0;}\n.qa{background:var(--accent-soft);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin:14px 0;} .qa .q{font-weight:700;color:var(--ink);margin-bottom:8px;} .qa .q::before{content:'Q ';color:var(--accent);font-weight:800;} .qa .a{color:var(--ink);padding-left:14px;border-left:3px solid var(--accent);} .qa .a::before{content:'A ';font-weight:800;color:var(--accent);}\n.highlight{background:linear-gradient(transparent 62%,var(--mark) 0);padding:0 2px;}\n.lead{font-size:1.08rem;font-weight:600;color:var(--ink);margin:0 0 16px;padding:8px 0 8px 16px;border-left:4px solid var(--accent);}\n.callout{background:var(--accent-soft);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px;padding:14px 18px;margin:16px 0;color:var(--ink);} .callout strong,.callout b{color:var(--accent);}\n.dim{font-family:var(--font-mono);font-size:.86em;background:var(--code-bg);border:1px dashed var(--border);padding:12px 18px;border-radius:8px;margin:10px 0;white-space:pre-wrap;line-height:1.7;color:var(--muted);}\n.svg-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin:18px 0;overflow-x:auto;box-shadow:var(--shadow-1);} .svg-wrap .caption{text-align:center;color:var(--muted);font-size:.86em;margin-top:10px;}\nsvg{display:block;margin:0 auto;max-width:100%;height:auto;}\n.paper-fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin:18px 0;box-shadow:var(--shadow-1);} .paper-fig img{display:block;max-width:100%;height:auto;margin:0 auto;border-radius:6px;} .paper-fig .caption{text-align:center;color:var(--muted);font-size:.88em;margin-top:12px;}\nfooter{text-align:center;color:var(--muted);font-size:.82em;margin:8px 0 0;}\n@media (max-width:768px){.pros-cons{grid-template-columns:1fr;}}\n@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important;}}\nbody{padding:0;}\n.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:clamp(24px,4vw,48px);max-width:1260px;margin:0 auto;padding:clamp(16px,3vw,36px);align-items:start;}\n.sidenav{position:sticky;top:16px;align-self:start;max-height:calc(100vh - 32px);overflow-y:auto;padding:4px 6px 20px 0;}\n.sidenav .lbl{display:block;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:6px 0 12px 12px;}\n.sidenav ul{list-style:none;} .sidenav li{margin:0;border:none;padding:0;}\n.sidenav a{display:block;padding:7px 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:.9rem;line-height:1.4;border-left:2px solid transparent;transition:color .15s,background .15s;}\n.sidenav a:hover{color:var(--accent);}\n.sidenav a.active{color:var(--accent);background:var(--accent-soft);border-left-color:var(--accent);font-weight:600;}\n.content{min-width:0;} .content>section{scroll-margin-top:16px;} .content>header{scroll-margin-top:16px;}\n@media (max-width:900px){.layout{grid-template-columns:1fr;} .sidenav{position:static;max-height:none;overflow:visible;border-bottom:1px solid var(--border);margin-bottom:12px;padding-bottom:12px;}}\n@media (prefers-color-scheme:dark){:root{--paper:#0f1216;--surface:#171b22;--ink:#e6ecf3;--muted:#98a4b5;--border:#2a313c;--code-bg:#1c222b;--accent-soft:color-mix(in srgb,var(--accent) 16%,#171b22);--shadow-1:0 1px 2px rgba(0,0,0,.4),0 2px 12px rgba(0,0,0,.35);}}\n</style>\n</head>\n<body>\n<div class=\"layout\">\n<nav class=\"sidenav\"><span class=\"lbl\">目录 Contents</span><ul><li><a href=\"#s1\">Intro</a></li><li><a href=\"#s2\">Method</a></li></ul></nav>\n<main class=\"content\">\n<header id=\"h\">H</header>\n<section id=\"s1\"><h2>Intro</h2></section>\n<footer>由 AI Reader 生成 · paper-craft 风格</footer>\n</main>\n</div>\n<script>\n(function(){\n var links=[].slice.call(document.querySelectorAll('.sidenav a[href^=\"#\"]'));\n var map={}; links.forEach(function(a){var id=decodeURIComponent(a.getAttribute('href').slice(1)); map[id]=a;\n  a.addEventListener('click',function(e){var t=document.getElementById(id); if(t){e.preventDefault(); t.scrollIntoView({behavior:'smooth',block:'start'});}});});\n var secs=[].slice.call(document.querySelectorAll('.content section[id], .content header[id]'));\n if(!('IntersectionObserver' in window)||!secs.length) return;\n var io=new IntersectionObserver(function(ents){ents.forEach(function(en){ if(en.isIntersecting){var id=en.target.id; links.forEach(function(a){a.classList.remove('active');}); if(map[id])map[id].classList.add('active');}});},{rootMargin:'-15% 0px -75% 0px',threshold:0});\n secs.forEach(function(s){io.observe(s);});\n})();\n</script>\n</body>\n</html>\n",
+  "assembleDeck": "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"UTF-8\"/>\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>\n<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Barlow:wght@400;700;800;900&display=swap\"/>\n<title>T</title>\n<style>\nhtml,body{margin:0;padding:0;height:100%;background:var(--bg,#000);}\n*{box-sizing:border-box;}\ndeck-stage section{overflow:hidden;}\n:root{--bg:#111111;--bg-alt:#1A1A18;--fg:#F0ECE5;--muted:#888880;--accent:#E85D26;--on-accent:#111111;--border:#282826;--font-display:'Barlow','Noto Sans SC',sans-serif;--font-body:'Barlow','Noto Sans SC',sans-serif;}\n</style>\n</head>\n<body>\n<deck-stage width=\"1920\" height=\"1080\">\n<section class=\"slide\">x</section>\n</deck-stage>\n<script>\n/* deck-stage.js — vendored from frontend-slides (MIT), © 2025 Zara Zhang.\n * Source: https://github.com/zarazhangrui/frontend-slides @ 9906a34\n * The real 16:9 presentation runtime (keyboard nav, stage scaling, print).\n * Inlined verbatim into generated decks; do not edit here. */\n/**\n * <deck-stage> — reusable web component for HTML decks.\n *\n * Handles:\n *  (a) speaker notes — reads <script type=\"application/json\" id=\"speaker-notes\">\n *      and posts {slideIndexChanged: N} to the parent window on nav.\n *  (b) keyboard navigation — ←/→, PgUp/PgDn, Space, Home/End, number keys.\n *  (c) press R to reset to slide 0 (with a tasteful keyboard hint).\n *  (d) bottom-center overlay showing slide count + hints, fades out on idle.\n *  (e) auto-scaling — inner canvas is a fixed design size (default 1920×1080)\n *      scaled with `transform: scale()` to fit the viewport, letterboxed.\n *      Set the `noscale` attribute to render at authored size (1:1) — the\n *      PPTX exporter sets this so its DOM capture sees unscaled geometry.\n *  (f) print — `@media print` lays every slide out as its own page at the\n *      design size, so the browser's Print → Save as PDF produces a clean\n *      one-page-per-slide PDF with no extra setup.\n *\n * Slides are HIDDEN, not unmounted. Non-active slides stay in the DOM with\n * `visibility: hidden` + `opacity: 0`, so their state (videos, iframes,\n * form inputs, React trees) is preserved across navigation.\n *\n * Lifecycle event — the component dispatches a `slidechange` CustomEvent on\n * itself whenever the active slide changes (including the initial mount).\n * The event bubbles and composes out of shadow DOM, so you can listen on\n * the <deck-stage> element or on document:\n *\n *   document.querySelector('deck-stage').addEventListener('slidechange', (e) => {\n *     e.detail.index         // new 0-based index\n *     e.detail.previousIndex // previous index, or -1 on init\n *     e.detail.total         // total slide count\n *     e.detail.slide         // the new active slide element\n *     e.detail.previousSlide // the prior slide element, or null on init\n *     e.detail.reason        // 'init' | 'keyboard' | 'click' | 'tap' | 'api'\n *   });\n *\n * Persistence: none at the deck level. The host app keeps the current slide\n * in its own URL (?slide=) and re-delivers it via location.hash on load, so a\n * bare load with no hash always starts at slide 1.\n *\n * Usage:\n *   <deck-stage width=\"1920\" height=\"1080\">\n *     <section data-label=\"Title\">...</section>\n *     <section data-label=\"Agenda\">...</section>\n *   </deck-stage>\n *\n * Slides are the direct element children of <deck-stage>. Each slide is\n * automatically tagged with:\n *   - data-screen-label=\"NN Label\"   (1-indexed, for comment flow)\n *   - data-om-validate=\"no_overflowing_text,no_overlapping_text,slide_sized_text\"\n */\n\n(() => {\n  const DESIGN_W_DEFAULT = 1920;\n  const DESIGN_H_DEFAULT = 1080;\n  const OVERLAY_HIDE_MS = 1800;\n  const VALIDATE_ATTR = 'no_overflowing_text,no_overlapping_text,slide_sized_text';\n\n  const pad2 = (n) => String(n).padStart(2, '0');\n\n  const stylesheet = `\n    :host {\n      position: fixed;\n      inset: 0;\n      display: block;\n      background: #000;\n      color: #fff;\n      font-family: -apple-system, BlinkMacSystemFont, \"Helvetica Neue\", Helvetica, Arial, sans-serif;\n      overflow: hidden;\n    }\n\n    .stage {\n      position: absolute;\n      inset: 0;\n      display: flex;\n      align-items: center;\n      justify-content: center;\n    }\n\n    .canvas {\n      position: relative;\n      transform-origin: center center;\n      flex-shrink: 0;\n      background: #fff;\n      will-change: transform;\n    }\n\n    /* Slides live in light DOM (via <slot>) so authored CSS still applies.\n       We absolutely position each slotted child to stack them. */\n    ::slotted(*) {\n      position: absolute !important;\n      inset: 0 !important;\n      width: 100% !important;\n      height: 100% !important;\n      box-sizing: border-box !important;\n      overflow: hidden;\n      opacity: 0;\n      pointer-events: none;\n      visibility: hidden;\n    }\n    ::slotted([data-deck-active]) {\n      opacity: 1;\n      pointer-events: auto;\n      visibility: visible;\n    }\n\n    /* Tap zones for mobile — back/forward thirds like Stories.\n       Transparent, no visible UI, don't block the overlay. */\n    .tapzones {\n      position: fixed;\n      inset: 0;\n      display: flex;\n      z-index: 2147482000;\n      pointer-events: none;\n    }\n    .tapzone {\n      flex: 1;\n      pointer-events: auto;\n      -webkit-tap-highlight-color: transparent;\n    }\n    /* Only activate tap zones on coarse pointers (touch devices). */\n    @media (hover: hover) and (pointer: fine) {\n      .tapzones { display: none; }\n    }\n\n    .overlay {\n      position: fixed;\n      left: 50%;\n      bottom: 22px;\n      transform: translate(-50%, 6px) scale(0.92);\n      filter: blur(6px);\n      display: flex;\n      align-items: center;\n      gap: 4px;\n      padding: 4px;\n      background: #000;\n      color: #fff;\n      border-radius: 999px;\n      font-size: 12px;\n      font-feature-settings: \"tnum\" 1;\n      letter-spacing: 0.01em;\n      opacity: 0;\n      pointer-events: none;\n      transition: opacity 260ms ease, transform 260ms cubic-bezier(.2,.8,.2,1), filter 260ms ease;\n      transform-origin: center bottom;\n      z-index: 2147483000;\n      user-select: none;\n    }\n    .overlay[data-visible] {\n      opacity: 1;\n      pointer-events: auto;\n      transform: translate(-50%, 0) scale(1);\n      filter: blur(0);\n    }\n\n    .btn {\n      appearance: none;\n      -webkit-appearance: none;\n      background: transparent;\n      border: 0;\n      margin: 0;\n      padding: 0;\n      color: inherit;\n      font: inherit;\n      cursor: default;\n      display: inline-flex;\n      align-items: center;\n      justify-content: center;\n      height: 28px;\n      min-width: 28px;\n      border-radius: 999px;\n      color: rgba(255,255,255,0.72);\n      transition: background 140ms ease, color 140ms ease;\n      -webkit-tap-highlight-color: transparent;\n    }\n    .btn:hover { background: rgba(255,255,255,0.12); color: #fff; }\n    .btn:active { background: rgba(255,255,255,0.18); }\n    .btn:focus { outline: none; }\n    .btn:focus-visible { outline: none; }\n    .btn::-moz-focus-inner { border: 0; }\n    .btn svg { width: 14px; height: 14px; display: block; }\n    .btn.reset {\n      font-size: 11px;\n      font-weight: 500;\n      letter-spacing: 0.02em;\n      padding: 0 10px 0 12px;\n      gap: 6px;\n      color: rgba(255,255,255,0.72);\n    }\n    .btn.reset .kbd {\n      display: inline-flex;\n      align-items: center;\n      justify-content: center;\n      min-width: 16px;\n      height: 16px;\n      padding: 0 4px;\n      font-family: ui-monospace, \"SF Mono\", Menlo, Consolas, monospace;\n      font-size: 10px;\n      line-height: 1;\n      color: rgba(255,255,255,0.88);\n      background: rgba(255,255,255,0.12);\n      border-radius: 4px;\n    }\n\n    .count {\n      font-variant-numeric: tabular-nums;\n      color: #fff;\n      font-weight: 500;\n      padding: 0 8px;\n      min-width: 42px;\n      text-align: center;\n      font-size: 12px;\n    }\n    .count .sep { color: rgba(255,255,255,0.45); margin: 0 3px; font-weight: 400; }\n    .count .total { color: rgba(255,255,255,0.55); }\n\n    .divider {\n      width: 1px;\n      height: 14px;\n      background: rgba(255,255,255,0.18);\n      margin: 0 2px;\n    }\n\n    /* ── Print: one page per slide, no chrome ────────────────────────────\n       The screen layout stacks every slide at inset:0 inside a scaled\n       canvas; for print we want them in document flow at the authored\n       design size so the browser paginates one slide per sheet. The\n       @page size is set from the width/height attributes via the inline\n       <style id=\"deck-stage-print-page\"> that connectedCallback injects\n       into <head> (the @page at-rule has no effect inside shadow DOM). */\n    @media print {\n      :host {\n        position: static;\n        inset: auto;\n        background: none;\n        overflow: visible;\n        color: inherit;\n      }\n      .stage { position: static; display: block; }\n      .canvas {\n        transform: none !important;\n        width: auto !important;\n        height: auto !important;\n        background: none;\n        will-change: auto;\n      }\n      ::slotted(*) {\n        position: relative !important;\n        inset: auto !important;\n        width: var(--deck-design-w) !important;\n        height: var(--deck-design-h) !important;\n        box-sizing: border-box !important;\n        opacity: 1 !important;\n        visibility: visible !important;\n        pointer-events: auto;\n        break-after: page;\n        page-break-after: always;\n        break-inside: avoid;\n        overflow: hidden;\n      }\n      ::slotted(*:last-child) {\n        break-after: auto;\n        page-break-after: auto;\n      }\n      .overlay, .tapzones { display: none !important; }\n    }\n  `;\n\n  class DeckStage extends HTMLElement {\n    static get observedAttributes() { return ['width', 'height', 'noscale']; }\n\n    constructor() {\n      super();\n      this._root = this.attachShadow({ mode: 'open' });\n      this._index = 0;\n      this._slides = [];\n      this._notes = [];\n      this._hideTimer = null;\n      this._mouseIdleTimer = null;\n\n      this._onKey = this._onKey.bind(this);\n      this._onResize = this._onResize.bind(this);\n      this._onSlotChange = this._onSlotChange.bind(this);\n      this._onMouseMove = this._onMouseMove.bind(this);\n      this._onTapBack = this._onTapBack.bind(this);\n      this._onTapForward = this._onTapForward.bind(this);\n    }\n\n    get designWidth() {\n      return parseInt(this.getAttribute('width'), 10) || DESIGN_W_DEFAULT;\n    }\n    get designHeight() {\n      return parseInt(this.getAttribute('height'), 10) || DESIGN_H_DEFAULT;\n    }\n\n    connectedCallback() {\n      this._render();\n      this._loadNotes();\n      this._syncPrintPageRule();\n      window.addEventListener('keydown', this._onKey);\n      window.addEventListener('resize', this._onResize);\n      window.addEventListener('mousemove', this._onMouseMove, { passive: true });\n      // Initial collection + layout happens via slotchange, which fires on mount.\n    }\n\n    disconnectedCallback() {\n      window.removeEventListener('keydown', this._onKey);\n      window.removeEventListener('resize', this._onResize);\n      window.removeEventListener('mousemove', this._onMouseMove);\n      if (this._hideTimer) clearTimeout(this._hideTimer);\n      if (this._mouseIdleTimer) clearTimeout(this._mouseIdleTimer);\n    }\n\n    attributeChangedCallback() {\n      if (this._canvas) {\n        this._canvas.style.width = this.designWidth + 'px';\n        this._canvas.style.height = this.designHeight + 'px';\n        this._canvas.style.setProperty('--deck-design-w', this.designWidth + 'px');\n        this._canvas.style.setProperty('--deck-design-h', this.designHeight + 'px');\n        this._fit();\n        this._syncPrintPageRule();\n      }\n    }\n\n    _render() {\n      const style = document.createElement('style');\n      style.textContent = stylesheet;\n\n      const stage = document.createElement('div');\n      stage.className = 'stage';\n\n      const canvas = document.createElement('div');\n      canvas.className = 'canvas';\n      canvas.style.width = this.designWidth + 'px';\n      canvas.style.height = this.designHeight + 'px';\n      canvas.style.setProperty('--deck-design-w', this.designWidth + 'px');\n      canvas.style.setProperty('--deck-design-h', this.designHeight + 'px');\n\n      const slot = document.createElement('slot');\n      slot.addEventListener('slotchange', this._onSlotChange);\n      canvas.appendChild(slot);\n      stage.appendChild(canvas);\n\n      // Tap zones (mobile): left third = back, right third = forward.\n      const tapzones = document.createElement('div');\n      tapzones.className = 'tapzones export-hidden';\n      tapzones.setAttribute('aria-hidden', 'true');\n      tapzones.setAttribute('data-noncommentable', '');\n      const tzBack = document.createElement('div');\n      tzBack.className = 'tapzone tapzone--back';\n      const tzMid = document.createElement('div');\n      tzMid.className = 'tapzone tapzone--mid';\n      tzMid.style.pointerEvents = 'none';\n      const tzFwd = document.createElement('div');\n      tzFwd.className = 'tapzone tapzone--fwd';\n      tzBack.addEventListener('click', this._onTapBack);\n      tzFwd.addEventListener('click', this._onTapForward);\n      tapzones.append(tzBack, tzMid, tzFwd);\n\n      // Overlay: compact, solid black, with clickable controls.\n      const overlay = document.createElement('div');\n      overlay.className = 'overlay export-hidden';\n      overlay.setAttribute('role', 'toolbar');\n      overlay.setAttribute('aria-label', 'Deck controls');\n      overlay.setAttribute('data-noncommentable', '');\n      overlay.innerHTML = `\n        <button class=\"btn prev\" type=\"button\" aria-label=\"Previous slide\" title=\"Previous (←)\">\n          <svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10 3L5 8l5 5\"/></svg>\n        </button>\n        <span class=\"count\" aria-live=\"polite\"><span class=\"current\">1</span><span class=\"sep\">/</span><span class=\"total\">1</span></span>\n        <button class=\"btn next\" type=\"button\" aria-label=\"Next slide\" title=\"Next (→)\">\n          <svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M6 3l5 5-5 5\"/></svg>\n        </button>\n        <span class=\"divider\"></span>\n        <button class=\"btn reset\" type=\"button\" aria-label=\"Reset to first slide\" title=\"Reset (R)\">Reset<span class=\"kbd\">R</span></button>\n      `;\n\n      overlay.querySelector('.prev').addEventListener('click', () => this._go(this._index - 1, 'click'));\n      overlay.querySelector('.next').addEventListener('click', () => this._go(this._index + 1, 'click'));\n      overlay.querySelector('.reset').addEventListener('click', () => this._go(0, 'click'));\n\n      this._root.append(style, stage, tapzones, overlay);\n      this._canvas = canvas;\n      this._slot = slot;\n      this._overlay = overlay;\n      this._countEl = overlay.querySelector('.current');\n      this._totalEl = overlay.querySelector('.total');\n    }\n\n    /** @page must live in the document stylesheet — it's a no-op inside\n     *  shadow DOM. Inject/update a single <head> style tag so the print\n     *  sheet matches the design size and Save-as-PDF yields one slide per\n     *  page with no margins. */\n    _syncPrintPageRule() {\n      const id = 'deck-stage-print-page';\n      let tag = document.getElementById(id);\n      if (!tag) {\n        tag = document.createElement('style');\n        tag.id = id;\n        document.head.appendChild(tag);\n      }\n      tag.textContent =\n        '@page { size: ' + this.designWidth + 'px ' + this.designHeight + 'px; margin: 0; } ' +\n        '@media print { html, body { margin: 0 !important; padding: 0 !important; background: none !important; overflow: visible !important; height: auto !important; } ' +\n        '* { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }';\n    }\n\n    _onSlotChange() {\n      this._collectSlides();\n      this._restoreIndex();\n      this._applyIndex({ showOverlay: false, broadcast: true, reason: 'init' });\n      this._fit();\n    }\n\n    _collectSlides() {\n      const assigned = this._slot.assignedElements({ flatten: true });\n      this._slides = assigned.filter((el) => {\n        // Skip template/style/script nodes even if someone slots them.\n        const tag = el.tagName;\n        return tag !== 'TEMPLATE' && tag !== 'SCRIPT' && tag !== 'STYLE';\n      });\n\n      this._slides.forEach((slide, i) => {\n        const n = i + 1;\n        // Determine a label for comment flow: prefer explicit data-label,\n        // then an existing data-screen-label, then first heading, else \"Slide\".\n        let label = slide.getAttribute('data-label');\n        if (!label) {\n          const existing = slide.getAttribute('data-screen-label');\n          if (existing) {\n            // Strip any leading number the author may have included.\n            label = existing.replace(/^\\s*\\d+\\s*/, '').trim() || existing;\n          }\n        }\n        if (!label) {\n          const h = slide.querySelector('h1, h2, h3, [data-title]');\n          if (h) label = (h.textContent || '').trim().slice(0, 40);\n        }\n        if (!label) label = 'Slide';\n        slide.setAttribute('data-screen-label', `${pad2(n)} ${label}`);\n\n        // Validation attribute for comment flow / auto-checks.\n        if (!slide.hasAttribute('data-om-validate')) {\n          slide.setAttribute('data-om-validate', VALIDATE_ATTR);\n        }\n\n        slide.setAttribute('data-deck-slide', String(i));\n      });\n\n      if (this._totalEl) this._totalEl.textContent = String(this._slides.length || 1);\n      if (this._index >= this._slides.length) this._index = Math.max(0, this._slides.length - 1);\n    }\n\n    _loadNotes() {\n      const tag = document.getElementById('speaker-notes');\n      if (!tag) { this._notes = []; return; }\n      try {\n        const parsed = JSON.parse(tag.textContent || '[]');\n        if (Array.isArray(parsed)) this._notes = parsed;\n      } catch (e) {\n        console.warn('[deck-stage] Failed to parse #speaker-notes JSON:', e);\n        this._notes = [];\n      }\n    }\n\n    _restoreIndex() {\n      // The host's ?slide= param is delivered as a #<int> hash (1-indexed) on\n      // the iframe src. No hash → slide 1; the deck itself keeps no position\n      // state across loads.\n      const h = (location.hash || '').match(/^#(\\d+)$/);\n      if (h) {\n        const n = parseInt(h[1], 10) - 1;\n        if (n >= 0 && n < this._slides.length) this._index = n;\n      }\n    }\n\n    _applyIndex({ showOverlay = true, broadcast = true, reason = 'init' } = {}) {\n      if (!this._slides.length) return;\n      const prev = this._prevIndex == null ? -1 : this._prevIndex;\n      const curr = this._index;\n      // Keep the iframe's own hash in sync so an in-iframe location.reload()\n      // (reload banner path in viewer-handle.ts) lands on the current slide,\n      // not the stale deep-link hash from initial load.\n      try { history.replaceState(null, '', '#' + (curr + 1)); } catch (e) {}\n      this._slides.forEach((s, i) => {\n        if (i === curr) s.setAttribute('data-deck-active', '');\n        else s.removeAttribute('data-deck-active');\n      });\n      if (this._countEl) this._countEl.textContent = String(curr + 1);\n\n      if (broadcast) {\n        // (1) Legacy: host-window postMessage for speaker-notes renderers.\n        try { window.postMessage({ slideIndexChanged: curr }, '*'); } catch (e) {}\n\n        // (2) In-page CustomEvent on the <deck-stage> element itself.\n        //     Bubbles and composes out of shadow DOM so slide code can listen:\n        //       document.querySelector('deck-stage').addEventListener('slidechange', e => {\n        //         e.detail.index, e.detail.previousIndex, e.detail.total, e.detail.slide, e.detail.reason\n        //       });\n        const detail = {\n          index: curr,\n          previousIndex: prev,\n          total: this._slides.length,\n          slide: this._slides[curr] || null,\n          previousSlide: prev >= 0 ? (this._slides[prev] || null) : null,\n          reason: reason, // 'init' | 'keyboard' | 'click' | 'tap' | 'api'\n        };\n        this.dispatchEvent(new CustomEvent('slidechange', {\n          detail,\n          bubbles: true,\n          composed: true,\n        }));\n      }\n\n      this._prevIndex = curr;\n      if (showOverlay) this._flashOverlay();\n    }\n\n    _flashOverlay() {\n      if (!this._overlay) return;\n      this._overlay.setAttribute('data-visible', '');\n      if (this._hideTimer) clearTimeout(this._hideTimer);\n      this._hideTimer = setTimeout(() => {\n        this._overlay.removeAttribute('data-visible');\n      }, OVERLAY_HIDE_MS);\n    }\n\n    _fit() {\n      if (!this._canvas) return;\n      // PPTX export sets noscale so the DOM capture sees authored-size\n      // geometry — the scaled canvas is in shadow DOM, so the exporter's\n      // resetTransformSelector can't reach .canvas.style.transform directly.\n      if (this.hasAttribute('noscale')) {\n        this._canvas.style.transform = 'none';\n        return;\n      }\n      const vw = window.innerWidth;\n      const vh = window.innerHeight;\n      const s = Math.min(vw / this.designWidth, vh / this.designHeight);\n      this._canvas.style.transform = `scale(${s})`;\n    }\n\n    _onResize() { this._fit(); }\n\n    _onMouseMove() {\n      // Keep overlay visible while mouse moves; hide after idle.\n      this._flashOverlay();\n    }\n\n    _onTapBack(e) {\n      e.preventDefault();\n      this._go(this._index - 1, 'tap');\n    }\n\n    _onTapForward(e) {\n      e.preventDefault();\n      this._go(this._index + 1, 'tap');\n    }\n\n    _onKey(e) {\n      // Ignore when the user is typing.\n      const t = e.target;\n      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;\n      if (e.metaKey || e.ctrlKey || e.altKey) return;\n\n      const key = e.key;\n      let handled = true;\n\n      if (key === 'ArrowRight' || key === 'PageDown' || key === ' ' || key === 'Spacebar') {\n        this._go(this._index + 1, 'keyboard');\n      } else if (key === 'ArrowLeft' || key === 'PageUp') {\n        this._go(this._index - 1, 'keyboard');\n      } else if (key === 'Home') {\n        this._go(0, 'keyboard');\n      } else if (key === 'End') {\n        this._go(this._slides.length - 1, 'keyboard');\n      } else if (key === 'r' || key === 'R') {\n        this._go(0, 'keyboard');\n      } else if (/^[0-9]$/.test(key)) {\n        // 1..9 jump to that slide; 0 jumps to 10.\n        const n = key === '0' ? 9 : parseInt(key, 10) - 1;\n        if (n < this._slides.length) this._go(n, 'keyboard');\n      } else {\n        handled = false;\n      }\n\n      if (handled) {\n        e.preventDefault();\n        this._flashOverlay();\n      }\n    }\n\n    _go(i, reason = 'api') {\n      if (!this._slides.length) return;\n      const clamped = Math.max(0, Math.min(this._slides.length - 1, i));\n      if (clamped === this._index) {\n        this._flashOverlay();\n        return;\n      }\n      this._index = clamped;\n      this._applyIndex({ showOverlay: true, broadcast: true, reason });\n    }\n\n    // Public API ------------------------------------------------------------\n\n    /** Current slide index (0-based). */\n    get index() { return this._index; }\n    /** Total slide count. */\n    get length() { return this._slides.length; }\n    /** Programmatically navigate. */\n    goTo(i) { this._go(i, 'api'); }\n    next() { this._go(this._index + 1, 'api'); }\n    prev() { this._go(this._index - 1, 'api'); }\n    reset() { this._go(0, 'api'); }\n  }\n\n  if (!customElements.get('deck-stage')) {\n    customElements.define('deck-stage', DeckStage);\n  }\n})();\n\n</script>\n</body>\n</html>\n",
+  "buildContext": "[B1 p1] Introduction\n[B2 p1] We study phone-use GUI agents and propose a reproducible benchmark with query generation.\n[B3 p2] Our method combines tiling and online softmax to reduce memory from O(N^2) to O(N).\n[B5 p3] Experiments on GSM8K and MATH show 2.4x speedup and 15% accuracy gain.",
+  "buildContextBounded": "[B1 p1] Introduction\n[B2 p1] We study phone-use GUI agents and propose a reproducible benchmark with query generation.\n[B3 p2] Our method combines tiling and online softmax to reduce memory from O(N^2) to O(N).\n[B5 p3] Experiments on GSM8K and MATH show 2.4x speedup and 15% accuracy gain.",
+  "buildContextBounded_small": "[B1 p1] Introduction\n\n…（中间内容略，可在对话中追问细节）…\n\n",
+  "buildRetrieved": "[B1 p1] Introduction\n[B2 p1] We study phone-use GUI agents and propose a reproducible benchmark with query generation.\n[B3 p2] Our method combines tiling and online softmax to reduce memory from O(N^2) to O(N).\n[B5 p3] Experiments on GSM8K and MATH show 2.4x speedup and 15% accuracy gain.",
+  "commonPresets": [
+    {
+      "broad": true,
+      "label": "总结(含图表)",
+      "q": "结合正文与图表，分【研究问题 / 方法 / 主要发现(含关键图表) / 结论与意义 / 局限】结构化总结这篇论文。最后额外用一个 ```svg 图直观呈现整体脉络与关键发现。",
+      "withFigures": true
+    },
+    {
+      "autoApply": true,
+      "broad": true,
+      "label": "自动高亮",
+      "q": "从全文挑选 6-10 个最关键的句子，对每一句用 [[hl:<id>]] 标出；可附 [[note:<id>|一句话理由]]。逐条给出指令并简要说明理由。"
+    },
+    {
+      "annos": true,
+      "broad": false,
+      "label": "总结我的高亮",
+      "q": "请总结我在这篇论文里高亮和批注的内容，并说明它们之间的联系与整体脉络。"
+    },
+    {
+      "annos": true,
+      "broad": false,
+      "label": "基于我的批注",
+      "q": "基于我在 PDF 里的高亮和批注回答：它们共同说明了什么？我可能在关注哪些问题？有没有遗漏的要点？"
+    }
+  ],
+  "customPrompt": "【用户自定义要求】（在不破坏上述引用/工具/画图规则的前提下遵循）\n【测试自定义要求】务必简洁\n\n",
+  "deckBaseCss": "html,body{margin:0;padding:0;height:100%;background:var(--bg,#000);}\n*{box-sizing:border-box;}\ndeck-stage section{overflow:hidden;}",
+  "deckOutline": "你是演示文稿设计师。读完论文后，规划一套可放映幻灯片的页目。只输出一个 JSON 对象（不要 ``` 包裹、不要多余文字）：\n{\"title\":\"论文标题\",\"sections\":[{\"id\":\"s1\",\"title\":\"这一页的短标题\",\"brief\":\"这一页要覆盖哪些关键点（具体列出，不要只写一句泛话）\"}]}\n**目标是把论文的关键信息讲清楚、不漏要点，而不是只做几页好看的海报。** 8–14 页，宁可多一页也不要把重要内容省掉：\n- 第一页固定「封面」（标题+一句话结论+作者/会议）；第二页固定「方法总览」（整体方法论+总览图）。\n- 为论文的**每个核心贡献**、**每组关键实验/结果**各安排一页（或拆多页），别把多个贡献挤成一句。\n- 覆盖：背景与问题、方法细节（关键设计/公式/步骤）、关键结果（具体数字与对比）、消融/对比、局限与未来。\n- **倒数第二页固定「速问速答」**（3–5 组 Q&A，覆盖 why/how/trade-off/常见疑问），最后一页「一句话总结」。\n- 每个 brief 要把该页该讲的要点**逐条列出来**（给 3–6 个要点/数字的提示），好让后续每页内容充实。标题用中文。只输出 JSON。\n\n【阅读技能：精读理解】\n按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+  "deckOverview": "你在做一套放映幻灯中的**这一页**，用中文。只输出一个 <section class=\"slide\"> 元素——不要 <style>/<html>、不要其它页、不要 ``` 包裹。\n这一页标题：方法总览；要覆盖：b。\n画布固定 1920×1080，用 px（标题 ~72–104px、正文/要点 ~26–32px、内边距 ~64–72px，不要用 vw）。\n【信息优先，不是极简海报】把本页该讲的关键点**完整列出来**，别为了好看省略重要内容：用 <ul> 列 4–8 条要点，或 2–4 个要点卡片、或对比 <table>；每条要点都带具体内容（数字、方法步骤、术语），不要只写标题词。信息多就用高密度「阅读型」排版，但保持可读（正文 ≥24px、不溢出一屏）。关键数字/结论用 var(--accent) 或加粗强调。\n配色/字体用这些 CSS 变量（已全局定义）：本页 background:var(--bg);color:var(--fg);，强调色 var(--accent)，次要文字 var(--muted)，标题 font-family:var(--font-display)、正文 var(--font-body)。\n这是「方法总览」页：先放一张总览图（优先 [[fig:<id>]] 本文架构/流程图；没有就 ```svg 手绘，根 <svg> 带 viewBox、不固定像素宽高），再用 3–5 条要点概述整体方法。\n结果类页务必给论文里的具体数字与对比。展示论文自己的图表用 [[fig:<id>]] 占位（会替换成真实图片）。可用图表：\n[[fig:4]] 图：Figure 1: architecture overview\n【风格：极简黑白】极简：米纸底 + 墨黑 + 纤细 Jost，靠排版与留白，不用彩色。语言：中文为主，专有名词/模型名/指标名/英文缩写保留原文（如 LoRA、RLHF、in-context）。审美上避免 AI 套路：不空话套话、不堆排比、不用装饰性加粗、不滥用 emoji、不要升华式结尾。\n\n【阅读技能：精读理解】\n按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+  "deckPresets": {
+    "blue-professional": {
+      "fonts": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap",
+      "id": "blue-professional",
+      "label": "商务蓝",
+      "note": "清爽专业：暖白底 + 电子蓝强调 + Space Grotesk，克制留白、适合汇报。",
+      "rootVars": ":root{--bg:#fdfae7;--bg-alt:#f4f0dd;--fg:#111111;--muted:#6b6b6b;--accent:#1e2bfa;--on-accent:#ffffff;--border:rgba(30,43,250,.2);--font-display:'Space Grotesk','Noto Sans SC',sans-serif;--font-body:'Space Grotesk','Noto Sans SC',sans-serif;}"
+    },
+    "broadside": {
+      "fonts": "https://fonts.googleapis.com/css2?family=Barlow:wght@400;700;800;900&display=swap",
+      "id": "broadside",
+      "label": "大字海报",
+      "note": "抗议海报编辑风：墨黑底 + 唯一烈橙强调 + 超大 Barlow 粗体小写标题，字即图形，零装饰。",
+      "rootVars": ":root{--bg:#111111;--bg-alt:#1A1A18;--fg:#F0ECE5;--muted:#888880;--accent:#E85D26;--on-accent:#111111;--border:#282826;--font-display:'Barlow','Noto Sans SC',sans-serif;--font-body:'Barlow','Noto Sans SC',sans-serif;}"
+    },
+    "monochrome": {
+      "fonts": "https://fonts.googleapis.com/css2?family=Jost:wght@200;400;600&display=swap",
+      "id": "monochrome",
+      "label": "极简黑白",
+      "note": "极简：米纸底 + 墨黑 + 纤细 Jost，靠排版与留白，不用彩色。",
+      "rootVars": ":root{--bg:#FAFADF;--bg-alt:#F2F2D2;--fg:#1A1A16;--muted:#5E5E54;--accent:#1A1A16;--on-accent:#FAFADF;--border:#8A8A80;--font-display:'Jost','Noto Sans SC',system-ui,sans-serif;--font-body:'Jost','Noto Sans SC',system-ui,sans-serif;}"
+    }
+  },
+  "deckQa": "你在做一套放映幻灯中的**这一页**，用中文。只输出一个 <section class=\"slide\"> 元素——不要 <style>/<html>、不要其它页、不要 ``` 包裹。\n这一页标题：速问速答；要覆盖：b。\n画布固定 1920×1080，用 px（标题 ~72–104px、正文/要点 ~26–32px、内边距 ~64–72px，不要用 vw）。\n【信息优先，不是极简海报】把本页该讲的关键点**完整列出来**，别为了好看省略重要内容：用 <ul> 列 4–8 条要点，或 2–4 个要点卡片、或对比 <table>；每条要点都带具体内容（数字、方法步骤、术语），不要只写标题词。信息多就用高密度「阅读型」排版，但保持可读（正文 ≥24px、不溢出一屏）。关键数字/结论用 var(--accent) 或加粗强调。\n配色/字体用这些 CSS 变量（已全局定义）：本页 background:var(--bg);color:var(--fg);，强调色 var(--accent)，次要文字 var(--muted)，标题 font-family:var(--font-display)、正文 var(--font-body)。\n这是「速问速答」页：用问答卡片布局，每条「问题 + 带具体数字/方法的回答」，≥3 组，覆盖 why/how/trade-off/常见疑问。\n结果类页务必给论文里的具体数字与对比。展示论文自己的图表用 [[fig:<id>]] 占位（会替换成真实图片）。可用图表：\n[[fig:4]] 图：Figure 1: architecture overview\n【风格：商务蓝】清爽专业：暖白底 + 电子蓝强调 + Space Grotesk，克制留白、适合汇报。语言：中文为主，专有名词/模型名/指标名/英文缩写保留原文（如 LoRA、RLHF、in-context）。审美上避免 AI 套路：不空话套话、不堆排比、不用装饰性加粗、不滥用 emoji、不要升华式结尾。\n\n【阅读技能：精读理解】\n按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+  "deckTitle": "你在做一套放映幻灯中的**这一页**，用中文。只输出一个 <section class=\"slide title-slide\"> 元素——不要 <style>/<html>、不要其它页、不要 ``` 包裹。\n这一页标题：封面；要覆盖：b。\n画布固定 1920×1080，用 px（标题 ~72–104px、正文/要点 ~26–32px、内边距 ~64–72px，不要用 vw）。\n这是封面：大号论文标题 + 一句话结论 + 作者/会议，留白大气（封面可以简）。\n配色/字体用这些 CSS 变量（已全局定义）：本页 background:var(--bg);color:var(--fg);，强调色 var(--accent)，次要文字 var(--muted)，标题 font-family:var(--font-display)、正文 var(--font-body)。\n结果类页务必给论文里的具体数字与对比。展示论文自己的图表用 [[fig:<id>]] 占位（会替换成真实图片）。可用图表：\n[[fig:4]] 图：Figure 1: architecture overview\n【风格：大字海报】抗议海报编辑风：墨黑底 + 唯一烈橙强调 + 超大 Barlow 粗体小写标题，字即图形，零装饰。语言：中文为主，专有名词/模型名/指标名/英文缩写保留原文（如 LoRA、RLHF、in-context）。审美上避免 AI 套路：不空话套话、不堆排比、不用装饰性加粗、不滥用 emoji、不要升华式结尾。\n\n【阅读技能：精读理解】\n按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+  "embedFigures": "see <div class=\"paper-fig\"><img src=\"data:image/png;base64,ZZZ\" alt=\"figure 3\"/><div class=\"caption\">本文图表 3</div></div> and ",
+  "figList": "[[fig:4]] 图：Figure 1: architecture overview",
+  "fileURI": [
+    "file:///a/b%20c/%E8%AE%BA%E6%96%87.html",
+    "file:///x/y%23z%3Fq.html",
+    "file:///plain.html"
+  ],
+  "multiSystemPrompt": "你是学术论文对比阅读助手，用中文回答。下面给出了 3 篇论文各自的相关片段（按『【论文 i · 标题】』分节，片段中的 (p页码) 为页码）。要求：\n1) 基于这些片段对比/综合作答，明确区分每篇的观点与贡献，不要混淆来源。\n2) 引用某篇时写（论文i · p页），不要用 [B<id>] 这类单篇徽标。\n3) 片段可能是节选；信息不足以回答时如实说明，不要臆造。\n4) 适合时用表格并列对比各篇的方法/数据/结论。\n\n【表达风格】像懂行的人跟同行说话：直接、具体、克制，别带 AI 腔。\n- 先说结论，别铺垫；不要“让我们深入探讨 / 首先需要明确 / 综上所述”这类套路开场和升华式收尾，也别用“这不仅是 X，更是 Y”的句式或金句式独句结尾。\n- 不堆排比和“三件套”，该列几点就几点；少用破折号串句，多用短句和句号。\n- 不用空话套话与夸大词（如“值得注意的是 / 不言而喻 / 彰显 / 赋能 / 生态 / 闭环 / 助力 / 至关重要 / 深刻洞察 / 一探究竟”），换成平实的说法。\n- 不写“专家认为 / 研究表明”这类空泛背书；有依据就用 [B<id>] 指向原文，没有就别编。\n- 不用装饰性加粗和 emoji，小标题用普通短语；不复述问题，不说“希望对你有帮助”之类客套。\n- 术语按中文科技写作习惯处理：模型名、指标名、专业名词、英文缩写（如 SFT、RLHF、VQA、gold label/gold data）保留原文，不要生硬直译——例如 gold 在“gold 数据 / 黄金标准”语境里不要译成“黄金”；没有通行译名就保留英文并在括号里给出解释。\n- 无论用哪种语言回答，都遵循以上风格，读起来像人写的，而不是模板。\n\n【用户自定义要求】（在不破坏上述引用/工具/画图规则的前提下遵循）\n【测试自定义要求】务必简洁\n\n各篇论文相关片段：\n\n<<CTX>>",
+  "normBase": "api.example.com",
+  "onepager": "你是论文分享助手，用中文把这篇论文浓缩成一页可分享的总结（Markdown）。按以下结构，每节具体、给数字、别空泛：\n# 标题\n**一句话 TL;DR**（这篇到底做了什么、结论是什么）\n## 背景与问题（它针对什么痛点）\n## 核心贡献（分条，每条一句话说清“新在哪”）\n## 方法（关键设计与直觉，必要时给维度/公式）\n## 关键结果（引用具体数字与对比；相关图表用 [[fig:<id>]] 指出）\n## 局限与开放问题\n## 一句话评价（值不值得读、适合谁）\n要求：基于论文，关键论断后用 [B<id>] 标注依据；不臆造。语言：中文为主，专有名词/模型名/指标名/英文缩写保留原文（如 LoRA、RLHF、in-context）。审美上避免 AI 套路：不空话套话、不堆排比、不用装饰性加粗、不滥用 emoji、不要升华式结尾。",
+  "paperInfo": {
+    "abstract": "We present a reproducible benchmark for phone-use GUI agents.",
+    "arxiv": "2511.01234",
+    "authors": [
+      "Zhe Dong",
+      "A Lee"
+    ],
+    "doi": "10.1234/abcd.5678",
+    "title": "Phone Use Agent: A Benchmark",
+    "url": "https://arxiv.org/abs/2511.01234",
+    "venue": "NeurIPS",
+    "year": "2026"
+  },
+  "retryAfter": [
+    2000,
+    30000,
+    null
+  ],
+  "sectionNorm": "你是论文分享助手，用中文写深度长文中的这一个章节，只输出一个 <section> 元素（不要输出其它章节、不要 ``` 包裹、不要 <html>/<style>）。\n章节 id=\"s2\"，标题：关键结果。要覆盖：b2。\n格式：<section id=\"s2\"><h2>关键结果</h2> … </section>。\n【覆盖优先 + 结构化：把本章要覆盖的要点讲全，一个都别漏；但用结构承载、不要写成大段文字墙。】\n· **务必覆盖上面「要覆盖」里列出的每一个要点**（论文里的具体数字、设定、步骤、消融、结论都要落到纸面），信息多宁可长一点也不要为了简洁省略要点。\n· 组织方式：用 <h3> 小标题分点 + <ul> 列表 + <table> 把要点列清楚，而不是堆长段落；需要叙述时 <p> 最多 3-4 行就断开。\n· 开头用一句 <p class=\"lead\">…</p> 点明本章结论。关键数字/结论/术语用 <span class=\"highlight\">…</span> 或 <strong>…</strong> 高亮；本章最重要的一条洞见放进 <div class=\"callout\">…</div>（每章最多 1 个）。\n按内容需要选用组件（样式已定义，直接用 class）：维度/数据流 <div class=\"dim\">[B,N,d]→…</div>；优缺点 <div class=\"pros-cons\"><div class=\"pros\"><h4>优点</h4><ul>…</ul></div><div class=\"cons\"><h4>局限</h4><ul>…</ul></div></div>；多项对比用 <table>（带表头）；流程/架构用 ```svg 手绘（根 <svg> 带 viewBox、不固定像素宽高）放进 <div class=\"svg-wrap\">…<div class=\"caption\">图N·说明</div></div>。\n若本章是速问速答，用 <div class=\"qa\"><div class=\"q\">问题</div><div class=\"a\">回答（带具体数字/方法）</div></div>，≥5 条，覆盖 why/how/trade-off。\n要展示论文自己的图表时用 [[fig:<id>]] 占位（会被替换成真实图片）。可用图表清单：\n[[fig:4]] 图：Figure 1: architecture overview\n关键论断后可用 [B<id>]；不臆造、图表不编造。语言：中文为主，专有名词/模型名/指标名/英文缩写保留原文（如 LoRA、RLHF、in-context）。审美上避免 AI 套路：不空话套话、不堆排比、不用装饰性加粗、不滥用 emoji、不要升华式结尾。\n\n【阅读技能：精读理解】\n按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+  "sectionOverview": "你是论文分享助手，用中文写深度长文中的这一个章节，只输出一个 <section> 元素（不要输出其它章节、不要 ``` 包裹、不要 <html>/<style>）。\n章节 id=\"s1\"，标题：方法总览。要覆盖：b1。\n格式：<section id=\"s1\"><h2>方法总览</h2> … </section>。\n【本章是「方法总览」：开头先给一张整体方法论总览图——优先用 [[fig:<id>]] 放本文的架构/流程图；没有合适图就用一段 ```svg 手绘总览图（根 <svg> 带 viewBox、不固定像素宽高）放进 <div class=\"svg-wrap\">…<div class=\"caption\">图1·方法总览</div></div>。然后用一段 <p class=\"lead\"> 概述整体思路。】\n【覆盖优先 + 结构化：把本章要覆盖的要点讲全，一个都别漏；但用结构承载、不要写成大段文字墙。】\n· **务必覆盖上面「要覆盖」里列出的每一个要点**（论文里的具体数字、设定、步骤、消融、结论都要落到纸面），信息多宁可长一点也不要为了简洁省略要点。\n· 组织方式：用 <h3> 小标题分点 + <ul> 列表 + <table> 把要点列清楚，而不是堆长段落；需要叙述时 <p> 最多 3-4 行就断开。\n· 开头用一句 <p class=\"lead\">…</p> 点明本章结论。关键数字/结论/术语用 <span class=\"highlight\">…</span> 或 <strong>…</strong> 高亮；本章最重要的一条洞见放进 <div class=\"callout\">…</div>（每章最多 1 个）。\n按内容需要选用组件（样式已定义，直接用 class）：维度/数据流 <div class=\"dim\">[B,N,d]→…</div>；优缺点 <div class=\"pros-cons\"><div class=\"pros\"><h4>优点</h4><ul>…</ul></div><div class=\"cons\"><h4>局限</h4><ul>…</ul></div></div>；多项对比用 <table>（带表头）；流程/架构用 ```svg 手绘（根 <svg> 带 viewBox、不固定像素宽高）放进 <div class=\"svg-wrap\">…<div class=\"caption\">图N·说明</div></div>。\n若本章是速问速答，用 <div class=\"qa\"><div class=\"q\">问题</div><div class=\"a\">回答（带具体数字/方法）</div></div>，≥5 条，覆盖 why/how/trade-off。\n要展示论文自己的图表时用 [[fig:<id>]] 占位（会被替换成真实图片）。可用图表清单：\n[[fig:4]] 图：Figure 1: architecture overview\n关键论断后可用 [B<id>]；不臆造、图表不编造。语言：中文为主，专有名词/模型名/指标名/英文缩写保留原文（如 LoRA、RLHF、in-context）。审美上避免 AI 套路：不空话套话、不堆排比、不用装饰性加粗、不滥用 emoji、不要升华式结尾。\n\n【写作风格 · 学术（paper-craft academic）】比论文更清晰的深度解析：术语准确不过度简化；准确引用论文定义与公式（有公式用 $…$/$$…$$）、引用图表标 Figure 号；客观陈述、少主观；结构 摘要→背景与动机→方法→实验→分析→结论，每节有明确技术目标，强调与相关工作对比；篇幅充分、论证扎实。\n\n【阅读技能：精读理解】\n按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+  "shareBaseCss": "*{box-sizing:border-box;margin:0;padding:0;}\n:root{--maxw:1040px;--radius:14px;--gap:24px;--paper:#faf7f2;--surface:#fffdf9;--ink:#1e2430;--muted:#6b6256;--accent:#9a3412;--on-accent:#fff;--accent-soft:#f6ece1;--border:#e7ddcd;--mark:#fde68a;--ok:#15803d;--bad:#b91c1c;--code-bg:#f4efe6;--shadow-1:0 1px 2px rgba(30,20,10,.05),0 2px 10px rgba(30,20,10,.04);--font-head:Georgia,'Times New Roman','Songti SC',serif;--font-body:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;--font-mono:'SF Mono',ui-monospace,Consolas,monospace;}\nhtml{-webkit-text-size-adjust:100%;}\nbody{font-family:var(--font-body);line-height:1.75;color:var(--ink);background:var(--paper);padding:clamp(16px,4vw,40px);min-height:100vh;}\n@supports (text-wrap:pretty){body{text-wrap:pretty;}}\n.container{max-width:var(--maxw);margin:0 auto;}\nheader{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(24px,5vw,44px);margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\nheader h1{font-family:var(--font-head);font-weight:800;font-size:clamp(1.65rem,4.2vw,2.5rem);line-height:1.2;letter-spacing:-.01em;color:var(--ink);}\n.paper-authors{color:var(--muted);margin-top:12px;font-size:.98rem;line-height:1.6;}\n.paper-venue{color:var(--accent);font-weight:600;margin-top:4px;font-size:.95rem;}\n.paper-badges{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;}\n.paper-badges a{text-decoration:none;font-size:.8rem;font-weight:600;padding:5px 13px;border-radius:999px;border:1px solid var(--accent);color:var(--accent);background:transparent;transition:background .15s ease,color .15s ease;}\n.paper-badges a:hover{background:var(--accent);color:var(--on-accent);}\n.tldr{margin-top:18px;font-size:1.06rem;color:var(--ink);font-weight:500;}\n.tags{margin-top:12px;} .tag{display:inline-block;background:var(--accent-soft);color:var(--accent);padding:3px 11px;border-radius:999px;margin:4px 6px 0 0;font-size:.8rem;font-weight:600;}\n.paper-abstract{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);font-size:.95rem;color:var(--ink);}\n.paper-abstract .lbl,.toc .lbl{display:block;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}\n.toc{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 26px;margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\n.toc ul{list-style:none;} .toc li{padding:5px 0;border-bottom:1px solid var(--border);} .toc li:last-child{border-bottom:none;} .toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid transparent;} .toc a:hover{color:var(--accent);border-bottom-color:var(--accent);}\nsection{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(22px,4vw,38px);margin-bottom:var(--gap);box-shadow:var(--shadow-1);}\nh2{font-family:var(--font-head);font-size:clamp(1.3rem,3vw,1.72rem);color:var(--ink);margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid var(--accent);}\nh3{font-size:1.2rem;color:var(--ink);margin:22px 0 10px;font-weight:700;}\nh4{color:var(--accent);margin:16px 0 8px;font-size:1rem;font-weight:700;}\np{margin-bottom:12px;} ul,ol{padding-left:22px;margin-bottom:12px;} li{margin:5px 0;} a{color:var(--accent);} strong{color:var(--ink);}\ncode{background:var(--code-bg);color:var(--accent);padding:2px 7px;border-radius:5px;font-family:var(--font-mono);font-size:.9em;}\ntable{width:100%;border-collapse:collapse;margin:16px 0;font-size:.94em;} th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);} th{background:var(--accent-soft);font-weight:700;color:var(--ink);}\n.pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;} .pros,.cons{padding:18px 20px;border-radius:10px;border:1px solid var(--border);} .pros{background:color-mix(in srgb,var(--ok) 9%,transparent);border-color:color-mix(in srgb,var(--ok) 30%,var(--border));} .cons{background:color-mix(in srgb,var(--bad) 9%,transparent);border-color:color-mix(in srgb,var(--bad) 30%,var(--border));}\n.pros h4{color:var(--ok);margin-top:0;} .cons h4{color:var(--bad);margin-top:0;}\n.qa{background:var(--accent-soft);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin:14px 0;} .qa .q{font-weight:700;color:var(--ink);margin-bottom:8px;} .qa .q::before{content:'Q ';color:var(--accent);font-weight:800;} .qa .a{color:var(--ink);padding-left:14px;border-left:3px solid var(--accent);} .qa .a::before{content:'A ';font-weight:800;color:var(--accent);}\n.highlight{background:linear-gradient(transparent 62%,var(--mark) 0);padding:0 2px;}\n.lead{font-size:1.08rem;font-weight:600;color:var(--ink);margin:0 0 16px;padding:8px 0 8px 16px;border-left:4px solid var(--accent);}\n.callout{background:var(--accent-soft);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px;padding:14px 18px;margin:16px 0;color:var(--ink);} .callout strong,.callout b{color:var(--accent);}\n.dim{font-family:var(--font-mono);font-size:.86em;background:var(--code-bg);border:1px dashed var(--border);padding:12px 18px;border-radius:8px;margin:10px 0;white-space:pre-wrap;line-height:1.7;color:var(--muted);}\n.svg-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin:18px 0;overflow-x:auto;box-shadow:var(--shadow-1);} .svg-wrap .caption{text-align:center;color:var(--muted);font-size:.86em;margin-top:10px;}\nsvg{display:block;margin:0 auto;max-width:100%;height:auto;}\n.paper-fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin:18px 0;box-shadow:var(--shadow-1);} .paper-fig img{display:block;max-width:100%;height:auto;margin:0 auto;border-radius:6px;} .paper-fig .caption{text-align:center;color:var(--muted);font-size:.88em;margin-top:12px;}\nfooter{text-align:center;color:var(--muted);font-size:.82em;margin:8px 0 0;}\n@media (max-width:768px){.pros-cons{grid-template-columns:1fr;}}\n@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important;}}",
+  "shareDarkCss": "@media (prefers-color-scheme:dark){:root{--paper:#0f1216;--surface:#171b22;--ink:#e6ecf3;--muted:#98a4b5;--border:#2a313c;--code-bg:#1c222b;--accent-soft:color-mix(in srgb,var(--accent) 16%,#171b22);--shadow-1:0 1px 2px rgba(0,0,0,.4),0 2px 12px rgba(0,0,0,.35);}}",
+  "shareHeader": "<header><h1>Phone Use Agent: A Benchmark</h1><div class=\"paper-authors\">Zhe Dong、A Lee</div><div class=\"paper-venue\">NeurIPS · 2026</div><div class=\"paper-badges\"><a href=\"https://arxiv.org/abs/2511.01234\" target=\"_blank\" rel=\"noopener\">arXiv 2511.01234</a><a href=\"https://doi.org/10.1234/abcd.5678\" target=\"_blank\" rel=\"noopener\">DOI</a></div><p class=\"tldr\">one line</p><div class=\"tags\"><span class=\"tag\">GUI</span><span class=\"tag\">agent</span></div><div class=\"paper-abstract\"><span class=\"lbl\">摘要 Abstract</span>We present a reproducible benchmark for phone-use GUI agents.</div></header>",
+  "shareOutline": "你是论文分享助手。读完论文后，规划一篇图文并茂深度长文的结构。只输出一个 JSON 对象（不要 ``` 包裹、不要任何多余文字）：\n{\"title\":\"论文标题\",\"tldr\":\"一句话说清这篇做了什么、结论是什么\",\"tags\":[\"关键词\",3至6个],\"sections\":[{\"id\":\"s1\",\"title\":\"章节标题\",\"brief\":\"这一章要覆盖哪些要点（一两句）\"}]}\n**目标是把论文讲全、不漏要点**（不是只做几节好看的摘要）。按论文丰富度 6–11 节：\n- **第一章固定「方法总览」**（整体方法论鸟瞰 + 一张总览图），**最后一章固定「速问速答」**（≥5 组 Q&A，覆盖 why/how/trade-off/常见疑问）。\n- 为论文的**每个核心贡献**、**每组关键实验/结果**各安排一节（或拆多节），别把多个贡献挤成一节；中间覆盖：背景与问题、方法细节（关键设计/公式/步骤）、关键结果、消融/对比、局限与未来。\n- 每个 brief 要把该节该覆盖的要点**逐条列出来**（给 3–6 个具体要点/数字的提示），别只写一句泛话。标题用中文。只输出 JSON。\n\n【写作风格 · 学术（paper-craft academic）】比论文更清晰的深度解析：术语准确不过度简化；准确引用论文定义与公式（有公式用 $…$/$$…$$）、引用图表标 Figure 号；客观陈述、少主观；结构 摘要→背景与动机→方法→实验→分析→结论，每节有明确技术目标，强调与相关工作对比；篇幅充分、论证扎实。\n\n【阅读技能：精读理解】\n按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+  "shareSidenav": "<span class=\"lbl\">目录 Contents</span><ul><li><a href=\"#s1\">Intro</a></li><li><a href=\"#s2\">Method</a></li></ul>",
+  "shareStyleNote": "语言：中文为主，专有名词/模型名/指标名/英文缩写保留原文（如 LoRA、RLHF、in-context）。审美上避免 AI 套路：不空话套话、不堆排比、不用装饰性加粗、不滥用 emoji、不要升华式结尾。",
+  "skillDirective": {
+    "deep-read": "\n\n【阅读技能：精读理解】\n按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+    "peer-review": "\n\n【阅读技能：同行评审】\n以顶会（NeurIPS/ICML/ACL）审稿人的标准写评审，客观、具体、可操作，每条意见指向具体章节/图表并用 [B] 溯源：贡献小结；优点 S1/S2…；缺点 W1/W2…；方法评分（各 1–5）Soundness、Novelty、Reproducibility、Experimental design、Statistical rigor、Scalability；给作者的问题；总体 Accept / Weak Accept / Borderline / Weak Reject / Reject + 置信度(高/中/低)。只依据论文证据，不臆测。",
+    "quick": "\n\n【阅读技能：速览】\n只给最关键的要点，极简、不展开、不客套。",
+    "redteam": "\n\n【阅读技能：批判红队】\n当红队：专挑方法与实验的漏洞——未控制的混淆变量、不公平对比、cherry-picking、过度声明、结论强于证据之处、可能的反例或失败情形。区分“有依据的质疑”和“吹毛求疵”，每条用 [B] 指向原文。",
+    "reproduce": "\n\n【阅读技能：可复现复刻】\n从复现角度读：逐项核对复现所需信息——数据集与预处理、模型结构与超参、训练设置与算力、评测协议与指标、代码/权重可得性。明确指出哪些齐全、哪些缺失，给出若要复刻的大致步骤与风险点；信息都要 [B] 溯源。",
+    "survey": "\n\n【阅读技能：领域综述】\n把这篇论文放到研究领域里看：主动用 web_search 找近年相关工作与 SOTA、用 web_fetch 读关键页面，沿参考文献找反复出现的关键论文与作者。说明本文相对已有工作的定位、改进与尚存空白；外部信息要给出处/链接。",
+    "three-pass": "\n\n【阅读技能：三遍速读】\n用 Keshav《How to Read a Paper》三遍法：第一遍只鸟瞰（题目/摘要/引言/各节标题/结论），判断 5C（类型、背景、正确性/假设是否成立、贡献、清晰度）；第二遍抓要点、仔细看图表（坐标轴是否标注、有无误差棒、结论是否统计显著）；第三遍挑战每个假设，相当于在脑中复刻。按用户要求的那一遍作答。",
+    "tutor": "\n\n【阅读技能：导师讲解】\n像导师给初学者讲：先讲清背景与为什么要做这件事，再用直觉/类比解释核心想法，少堆术语；出现的关键术语要解释；多举具体例子；耐心、循序渐进。"
+  },
+  "skillInject": {
+    "deep-read": "按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+    "peer-review": "以顶会（NeurIPS/ICML/ACL）审稿人的标准写评审，客观、具体、可操作，每条意见指向具体章节/图表并用 [B] 溯源：贡献小结；优点 S1/S2…；缺点 W1/W2…；方法评分（各 1–5）Soundness、Novelty、Reproducibility、Experimental design、Statistical rigor、Scalability；给作者的问题；总体 Accept / Weak Accept / Borderline / Weak Reject / Reject + 置信度(高/中/低)。只依据论文证据，不臆测。",
+    "quick": "只给最关键的要点，极简、不展开、不客套。",
+    "redteam": "当红队：专挑方法与实验的漏洞——未控制的混淆变量、不公平对比、cherry-picking、过度声明、结论强于证据之处、可能的反例或失败情形。区分“有依据的质疑”和“吹毛求疵”，每条用 [B] 指向原文。",
+    "reproduce": "从复现角度读：逐项核对复现所需信息——数据集与预处理、模型结构与超参、训练设置与算力、评测协议与指标、代码/权重可得性。明确指出哪些齐全、哪些缺失，给出若要复刻的大致步骤与风险点；信息都要 [B] 溯源。",
+    "survey": "把这篇论文放到研究领域里看：主动用 web_search 找近年相关工作与 SOTA、用 web_fetch 读关键页面，沿参考文献找反复出现的关键论文与作者。说明本文相对已有工作的定位、改进与尚存空白；外部信息要给出处/链接。",
+    "three-pass": "用 Keshav《How to Read a Paper》三遍法：第一遍只鸟瞰（题目/摘要/引言/各节标题/结论），判断 5C（类型、背景、正确性/假设是否成立、贡献、清晰度）；第二遍抓要点、仔细看图表（坐标轴是否标注、有无误差棒、结论是否统计显著）；第三遍挑战每个假设，相当于在脑中复刻。按用户要求的那一遍作答。",
+    "tutor": "像导师给初学者讲：先讲清背景与为什么要做这件事，再用直觉/类比解释核心想法，少堆术语；出现的关键术语要解释；多举具体例子；耐心、循序渐进。"
+  },
+  "skillsFull": [
+    {
+      "desc": "结构化精读（默认）",
+      "id": "deep-read",
+      "inject": "按结构化精读：先抓研究问题与动机，再方法、主要发现（给出关键数字并 [B] 溯源）、结论与意义、局限；论断都要能回指原文。",
+      "label": "精读理解",
+      "presets": [
+        {
+          "broad": true,
+          "label": "总结全文",
+          "q": "请分【研究问题 / 方法 / 主要发现 / 结论与意义 / 局限】五部分，结构化总结这篇论文。最后额外用一个 ```svg 图直观呈现整体脉络（问题→方法→发现→结论）。"
+        },
+        {
+          "broad": true,
+          "label": "三行摘要",
+          "q": "用三行中文给出这篇论文的极简摘要：问题、方法、结论各一行。"
+        },
+        {
+          "broad": true,
+          "label": "关键词",
+          "q": "列出本文 6-10 个关键术语，每个一句话解释，并用 [B<id>] 标注来源。"
+        },
+        {
+          "broad": false,
+          "label": "核心贡献",
+          "q": "这篇论文的核心贡献是什么？最后额外用一个 ```svg 图把各项贡献及其关系直观呈现出来。"
+        },
+        {
+          "broad": false,
+          "label": "方法",
+          "q": "它用了什么方法？简要说明。"
+        },
+        {
+          "broad": false,
+          "label": "主要结论",
+          "q": "主要结论或实验结果是什么？最后额外用一个 ```svg 图直观呈现关键结论之间的关系。"
+        },
+        {
+          "broad": false,
+          "label": "局限",
+          "q": "有哪些局限或未来工作？"
+        }
+      ]
+    },
+    {
+      "agentInject": "以审稿视角标注：优先标出贡献句、方法关键决策、支撑或存疑的实验结果、以及局限与过度声明。",
+      "desc": "顶会审稿人视角",
+      "id": "peer-review",
+      "inject": "以顶会（NeurIPS/ICML/ACL）审稿人的标准写评审，客观、具体、可操作，每条意见指向具体章节/图表并用 [B] 溯源：贡献小结；优点 S1/S2…；缺点 W1/W2…；方法评分（各 1–5）Soundness、Novelty、Reproducibility、Experimental design、Statistical rigor、Scalability；给作者的问题；总体 Accept / Weak Accept / Borderline / Weak Reject / Reject + 置信度(高/中/低)。只依据论文证据，不臆测。",
+      "label": "同行评审",
+      "presets": [
+        {
+          "broad": true,
+          "label": "评审总览",
+          "q": "按同行评审格式给出完整评审：贡献小结、优点(S)、缺点(W)、方法评分表、给作者的问题、总体结论与置信度。"
+        },
+        {
+          "broad": true,
+          "label": "主要贡献",
+          "q": "这篇论文声称的主要贡献有哪些？逐条列出并用 [B] 溯源，评估其新颖性。"
+        },
+        {
+          "broad": true,
+          "label": "优点 (S)",
+          "q": "列出这篇论文的主要优点 S1/S2/S3…，每条指明在何处、为何重要。"
+        },
+        {
+          "broad": true,
+          "label": "缺点 (W)",
+          "q": "列出主要缺点/隐患 W1/W2/W3…，每条指明在何处、为何是问题、如何改进。"
+        },
+        {
+          "broad": true,
+          "label": "方法评分",
+          "q": "对方法按 Soundness / Novelty / Reproducibility / Experimental design / Statistical rigor / Scalability 各打 1–5 分并简述理由。"
+        },
+        {
+          "broad": false,
+          "label": "给作者的问题",
+          "q": "列出 3-6 个最该向作者澄清的问题。"
+        },
+        {
+          "broad": true,
+          "label": "是否接收",
+          "q": "给出总体建议（Accept / Weak Accept / Borderline / Weak Reject / Reject）与置信度，并说明关键依据。"
+        }
+      ]
+    },
+    {
+      "desc": "Keshav 三遍法",
+      "id": "three-pass",
+      "inject": "用 Keshav《How to Read a Paper》三遍法：第一遍只鸟瞰（题目/摘要/引言/各节标题/结论），判断 5C（类型、背景、正确性/假设是否成立、贡献、清晰度）；第二遍抓要点、仔细看图表（坐标轴是否标注、有无误差棒、结论是否统计显著）；第三遍挑战每个假设，相当于在脑中复刻。按用户要求的那一遍作答。",
+      "label": "三遍速读",
+      "presets": [
+        {
+          "broad": true,
+          "label": "第一遍鸟瞰",
+          "q": "用 Keshav 第一遍法鸟瞰本文：给出 5C（类型/背景/正确性/贡献/清晰度）的快速判断。"
+        },
+        {
+          "broad": true,
+          "label": "第二遍要点",
+          "q": "用 Keshav 第二遍法：抓住主旨与证据，并逐一点评关键图表（坐标轴/误差棒/是否统计显著），用 [B] 溯源。",
+          "withFigures": true
+        },
+        {
+          "broad": true,
+          "label": "第三遍质疑",
+          "q": "用 Keshav 第三遍法：挑战文中每个关键假设，指出哪些未被证据支撑、若要复刻还缺什么。"
+        },
+        {
+          "broad": true,
+          "label": "图表体检",
+          "q": "逐一检查本文主要图表：坐标轴是否清楚、是否有误差棒/置信区间、呈现是否误导。",
+          "withFigures": true
+        }
+      ]
+    },
+    {
+      "desc": "放到领域里看（联网更佳）",
+      "id": "survey",
+      "inject": "把这篇论文放到研究领域里看：主动用 web_search 找近年相关工作与 SOTA、用 web_fetch 读关键页面，沿参考文献找反复出现的关键论文与作者。说明本文相对已有工作的定位、改进与尚存空白；外部信息要给出处/链接。",
+      "label": "领域综述",
+      "presets": [
+        {
+          "broad": true,
+          "label": "相关工作",
+          "q": "这篇论文属于哪条研究脉络？联网检索并列出最相关的几篇工作及其关系。"
+        },
+        {
+          "broad": true,
+          "label": "与 SOTA 对比",
+          "q": "与当前 SOTA 相比，本文处在什么位置？联网核对后给出对比。"
+        },
+        {
+          "broad": true,
+          "label": "本文定位",
+          "q": "用一段话说清本文相对已有工作的独特定位与增量贡献。"
+        },
+        {
+          "broad": false,
+          "label": "后续方向",
+          "q": "基于本文与领域现状，有哪些值得做的后续方向？"
+        }
+      ]
+    },
+    {
+      "desc": "能不能复现",
+      "id": "reproduce",
+      "inject": "从复现角度读：逐项核对复现所需信息——数据集与预处理、模型结构与超参、训练设置与算力、评测协议与指标、代码/权重可得性。明确指出哪些齐全、哪些缺失，给出若要复刻的大致步骤与风险点；信息都要 [B] 溯源。",
+      "label": "可复现复刻",
+      "presets": [
+        {
+          "broad": true,
+          "label": "复现清单",
+          "q": "列一张复现清单：数据、预处理、模型与超参、训练设置与算力、评测与指标、代码可得性，逐项说明论文是否给出并 [B] 溯源。"
+        },
+        {
+          "broad": true,
+          "label": "缺失信息",
+          "q": "要复现本文，还缺哪些关键信息或资源？"
+        },
+        {
+          "broad": true,
+          "label": "动手步骤",
+          "q": "给出复刻本文核心结果的大致步骤与所需条件。"
+        },
+        {
+          "broad": false,
+          "label": "风险点",
+          "q": "复现中最可能踩坑或结果对不上的地方有哪些？"
+        }
+      ]
+    },
+    {
+      "desc": "专挑漏洞",
+      "id": "redteam",
+      "inject": "当红队：专挑方法与实验的漏洞——未控制的混淆变量、不公平对比、cherry-picking、过度声明、结论强于证据之处、可能的反例或失败情形。区分“有依据的质疑”和“吹毛求疵”，每条用 [B] 指向原文。",
+      "label": "批判红队",
+      "presets": [
+        {
+          "broad": true,
+          "label": "找漏洞",
+          "q": "从方法与实验里找出最站不住脚的地方，逐条说明问题所在并 [B] 溯源。"
+        },
+        {
+          "broad": true,
+          "label": "挑战假设",
+          "q": "文中有哪些被默认成立、其实需要验证的关键假设？"
+        },
+        {
+          "broad": true,
+          "label": "可能反例",
+          "q": "在什么情形/数据下本文方法可能失效或结论不成立？"
+        },
+        {
+          "broad": true,
+          "label": "过度声明",
+          "q": "哪些结论强于其证据支撑？指出被夸大的声明。"
+        }
+      ]
+    },
+    {
+      "desc": "讲给新手",
+      "id": "tutor",
+      "inject": "像导师给初学者讲：先讲清背景与为什么要做这件事，再用直觉/类比解释核心想法，少堆术语；出现的关键术语要解释；多举具体例子；耐心、循序渐进。",
+      "label": "导师讲解",
+      "presets": [
+        {
+          "broad": true,
+          "label": "讲背景",
+          "q": "用通俗的话讲清这篇论文的背景、它想解决的问题、为什么重要。"
+        },
+        {
+          "broad": true,
+          "label": "讲直觉",
+          "q": "用直觉或类比解释本文的核心想法，尽量不用公式术语。"
+        },
+        {
+          "broad": true,
+          "label": "术语表",
+          "q": "列出理解本文需要先懂的关键术语，每个用一句话通俗解释。"
+        },
+        {
+          "broad": false,
+          "label": "举例说明",
+          "q": "用一个具体例子走一遍本文方法是怎么工作的。"
+        }
+      ]
+    },
+    {
+      "desc": "极简要点",
+      "id": "quick",
+      "inject": "只给最关键的要点，极简、不展开、不客套。",
+      "label": "速览",
+      "presets": [
+        {
+          "broad": true,
+          "label": "三句话",
+          "q": "用三句话说清这篇论文：问题、做法、结论。"
+        },
+        {
+          "broad": true,
+          "label": "一张图",
+          "q": "用一个 ```svg 图概括这篇论文的整体脉络。"
+        },
+        {
+          "broad": true,
+          "label": "关键数字",
+          "q": "列出本文最重要的几个数字/结果，并 [B] 溯源。"
+        },
+        {
+          "broad": false,
+          "label": "一句话结论",
+          "q": "用一句话给出本文最核心的结论。"
+        }
+      ]
+    }
+  ],
+  "styleGuide": "【表达风格】像懂行的人跟同行说话：直接、具体、克制，别带 AI 腔。\n- 先说结论，别铺垫；不要“让我们深入探讨 / 首先需要明确 / 综上所述”这类套路开场和升华式收尾，也别用“这不仅是 X，更是 Y”的句式或金句式独句结尾。\n- 不堆排比和“三件套”，该列几点就几点；少用破折号串句，多用短句和句号。\n- 不用空话套话与夸大词（如“值得注意的是 / 不言而喻 / 彰显 / 赋能 / 生态 / 闭环 / 助力 / 至关重要 / 深刻洞察 / 一探究竟”），换成平实的说法。\n- 不写“专家认为 / 研究表明”这类空泛背书；有依据就用 [B<id>] 指向原文，没有就别编。\n- 不用装饰性加粗和 emoji，小标题用普通短语；不复述问题，不说“希望对你有帮助”之类客套。\n- 术语按中文科技写作习惯处理：模型名、指标名、专业名词、英文缩写（如 SFT、RLHF、VQA、gold label/gold data）保留原文，不要生硬直译——例如 gold 在“gold 数据 / 黄金标准”语境里不要译成“黄金”；没有通行译名就保留英文并在括号里给出解释。\n- 无论用哪种语言回答，都遵循以上风格，读起来像人写的，而不是模板。\n\n",
+  "svgFence": "pre <svg><rect/></svg> post",
+  "systemPrompt": "你是针对某一篇学术论文的阅读助手，用中文回答。论文正文按块给出，每块形如 [B<id> p<页码>] 文本。要求：\n1) 回答必须基于论文；论文没涉及的就说没涉及。\n2) 在每个关键论断后用 [B<id>] 标出依据的块（可多个），方便用户点回原文。\n3) 当用户要求划线/标注，或你认为某处值得高亮时，可输出指令：划线用 [[hl:<id>]]，加批注用 [[note:<id>|批注内容]]。这些会渲染成按钮由用户一键应用到 PDF。\n4) 当用户想看某个图/表的视觉内容、或你需要看图才能准确解释时，输出 [[fig:<id>]]（id 为图/表块），会渲染该区域图像并交给多模态模型识图。\n5) 若正文前附有【用户在 PDF 中的高亮与批注】，当用户问到『我的高亮/批注』时请优先结合这些内容回答。\n6) 需要用图示说明（流程、架构、时间线、关系等）时，请输出一个 ```svg 代码块，会被内联渲染成矢量图。要点：用 <rect>/<text>/<line>/<path>/<polygon> 等手绘；根 <svg> 必须带 viewBox 定义坐标系（不要写固定像素 width/height，会自适应容器宽度）；viewBox 宽度建议 ≤ 600，框与文字不要重叠、箭头对齐、字号分层、留白充足、元素对齐。审美上避免 AI 设计套路：配色克制（中性色带一点偏向强调色的色相、再加一个强调色，别用纯灰；别套用米色+衬线+赭石、紫蓝渐变、荧光绿点缀这类默认风格），不要用 emoji、不要什么都居中或一律圆角；编号(01/02/03)只在内容确实是有序步骤时才用。不要用 mermaid（本环境无法渲染，只会显示源码）。仅在确实有助于理解时才画。\n\n【表达风格】像懂行的人跟同行说话：直接、具体、克制，别带 AI 腔。\n- 先说结论，别铺垫；不要“让我们深入探讨 / 首先需要明确 / 综上所述”这类套路开场和升华式收尾，也别用“这不仅是 X，更是 Y”的句式或金句式独句结尾。\n- 不堆排比和“三件套”，该列几点就几点；少用破折号串句，多用短句和句号。\n- 不用空话套话与夸大词（如“值得注意的是 / 不言而喻 / 彰显 / 赋能 / 生态 / 闭环 / 助力 / 至关重要 / 深刻洞察 / 一探究竟”），换成平实的说法。\n- 不写“专家认为 / 研究表明”这类空泛背书；有依据就用 [B<id>] 指向原文，没有就别编。\n- 不用装饰性加粗和 emoji，小标题用普通短语；不复述问题，不说“希望对你有帮助”之类客套。\n- 术语按中文科技写作习惯处理：模型名、指标名、专业名词、英文缩写（如 SFT、RLHF、VQA、gold label/gold data）保留原文，不要生硬直译——例如 gold 在“gold 数据 / 黄金标准”语境里不要译成“黄金”；没有通行译名就保留英文并在括号里给出解释。\n- 无论用哪种语言回答，都遵循以上风格，读起来像人写的，而不是模板。\n\n【用户自定义要求】（在不破坏上述引用/工具/画图规则的前提下遵循）\n【测试自定义要求】务必简洁\n\n论文内容：\n\n<<CTX>>",
+  "temperature": 0.3,
+  "translatePrompt": "你是专业学术翻译。只翻译「待翻译」区里带编号的段落，翻译成English。严格要求：\n- 逐段翻译，输出每段一行，格式为 [[n]] 译文（n 为原段编号）；不要输出原文、不要加任何说明或标题。\n- 「上文」「下文」区仅供理解上下文与保持术语一致，绝对不要翻译它们、也不要为它们编号输出。\n- 段落编号必须与「待翻译」区一一对应，不得漏段、合并或拆分。\n- 保留数学公式、变量符号、文献引用标记（如 [12]、(Smith et al., 2024)）、以及英文专有名词/模型名/缩写原样（如 Transformer、RLHF、LoRA）。\n- 忠实、通顺，符合English科技写作习惯，前后术语保持一致。"
+}

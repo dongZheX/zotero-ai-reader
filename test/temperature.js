@@ -15,10 +15,7 @@ const ctx = {
   },
   PathUtils: {}, IOUtils: {}, console, setTimeout, TextDecoder, TextEncoder,
 };
-ctx.AIReader = undefined;
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'content', 'aireader.js'), 'utf8'), ctx, { filename: 'aireader.js' });
-const A = ctx.AIReader;
+const A = require('./_load').loadInto(ctx);
 
 const msgs = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hi' }];
 const bodies = (fmt) => [JSON.parse(A._bodyFor(fmt, msgs, false)), JSON.parse(A._toolBody(fmt, msgs, [], false))];

@@ -37,10 +37,7 @@ const ctx = {
   IOUtils: { async exists() { return false; }, async readUTF8() { return ''; } },
   console, setTimeout, TextDecoder, TextEncoder,
 };
-ctx.AIReader = undefined;
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'content', 'aireader.js'), 'utf8'), ctx, { filename: 'aireader.js' });
-const A = ctx.AIReader;
+const A = require('./_load').loadInto(ctx);
 
 // helper: a navigate() call's selector must resolve to `want` in DOC_TEXT
 function navHits(nav, want) {
