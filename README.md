@@ -31,6 +31,16 @@ Two things set it apart from a plain chat box:
 <img src="assets/ui-preview.svg" alt="AI Reader panel" width="560"/>
 </div>
 
+### Demo
+
+<div align="center">
+
+<video src="https://github.com/dongZheX/zotero-ai-reader/releases/download/v0.10.1/demo.mp4" controls muted width="720"></video>
+
+<sub><a href="https://github.com/dongZheX/zotero-ai-reader/releases/download/v0.10.1/demo.mp4">▶ Watch the demo</a> if the player doesn't load.</sub>
+
+</div>
+
 ## Features
 
 | | |

@@ -31,6 +31,16 @@ Zotero 条目面板侧栏里的一个对话框。选中一篇论文就能提问�
 <img src="assets/ui-preview.svg" alt="AI Reader 面板" width="560"/>
 </div>
 
+### 演示
+
+<div align="center">
+
+<video src="https://github.com/dongZheX/zotero-ai-reader/releases/download/v0.10.1/demo.mp4" controls muted width="720"></video>
+
+<sub>播放器加载不出时，<a href="https://github.com/dongZheX/zotero-ai-reader/releases/download/v0.10.1/demo.mp4">▶ 点此观看演示</a>。</sub>
+
+</div>
+
 ## 功能
 
 | | |
