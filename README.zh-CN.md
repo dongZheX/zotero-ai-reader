@@ -7,7 +7,7 @@
 <p>在 Zotero 条目面板里用 AI 读论文。回答带出处，点页码徽标即可跳回 PDF。</p>
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.10.0-3b7ddd?style=flat-square"/>
+  <img alt="version" src="https://img.shields.io/badge/version-0.10.1-3b7ddd?style=flat-square"/>
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7 · 8 · 10 · 11-cc2936?style=flat-square&logo=zotero&logoColor=white"/>
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
