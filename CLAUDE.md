@@ -112,6 +112,19 @@ Tests are a headless Node simulation in `test/sim.js`.
 - **Never `await resp.json()` blindly.** Read `resp.text()` then parse, and on
   failure throw an error that includes a snippet of the real body — a non-JSON
   response usually means a wrong Base URL or API format, not a code bug.
+- **`AbortController` is NOT a global in the bootstrap sandbox** (`typeof
+  AbortController === "undefined"`), but `fetch` IS. Source the controller from
+  the main window (`_abortCtor()` → `Zotero.getMainWindow().AbortController`); a
+  window-created signal correctly aborts the sandbox `fetch`. A bare
+  `new AbortController()` is undefined → silently disables BOTH the request
+  timeout and cancellation (this is why the Stop button couldn't kill a hung
+  request, and why the timeout never actually fired).
+- **Cancel = real abort, not just a flag.** `state.cancel` alone can't stop a
+  request stalled before the first byte (the `reader.read()`/initial `fetch`
+  await never yields to re-check the flag). `_abortGuard(shouldStop)` polls the
+  flag on a window timer and calls `controller.abort()`; `_streamAnswer` /
+  `callLLMStream` pass its `signal` into `_fetchLLM` (`cfg.abortSignal`), which
+  wires it to the fetch. Verified live: a hung fetch aborts in ~0.4s.
 - Base URL normalization (`_normBase`): bare host → append `/v1`; `http` →
   `https` for remote hosts but keep `localhost` on `http`.
 - `maxTokens` pref: `0` means unlimited. For the Anthropic format `max_tokens`

@@ -2190,38 +2190,65 @@ AIReader = {
   async _streamAnswer(messages, tools, onDelta, shouldStop, meta) {
     meta = meta || {};
     const fmt = this._fmt();
-    // Long streamed answers can take minutes; the default 60s abort would cut
-    // the stream mid-sentence, so give streaming a generous ceiling and no retry.
-    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._toolBody(fmt, messages, tools, true) }, { timeoutMs: 600000, retries: 0 });
-    if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
-    if (!resp.body || typeof resp.body.getReader !== "function") {
-      const raw = await resp.text(); const data = this._parseOrThrow(raw);
-      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-      this._captureUsage(meta, data);
-      const parsed = this._parseToolCalls(fmt, data);
-      if (parsed.text) onDelta(parsed.text);
-      return { text: parsed.text, calls: parsed.calls, reasoning: parsed.reasoning || [] };
-    }
-    const reader = resp.body.getReader(); const dec = new TextDecoder();
-    let buf = "", text = ""; const tc = {}; const racc = {};
-    while (true) {
-      if (shouldStop && shouldStop()) { try { await reader.cancel(); } catch (e) {} break; }
-      const { done, value } = await reader.read(); if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-        if (!line || !line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim(); if (payload === "[DONE]") continue;
-        let j; try { j = JSON.parse(payload); } catch (e) { continue; }
-        if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
-        this._captureUsage(meta, j);
-        const d = this._streamDelta(fmt, j); if (d) { text += d; onDelta(d); }
-        this._streamToolDelta(fmt, j, tc);
-        this._streamReasoningDelta(fmt, j, racc);
+    const ab = this._abortGuard(shouldStop); // Stop button aborts the fetch/stream even mid-connection
+    try {
+      // Long streamed answers can take minutes; the default 60s abort would cut
+      // the stream mid-sentence, so give streaming a generous ceiling and no retry.
+      const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._toolBody(fmt, messages, tools, true) }, { timeoutMs: 600000, retries: 0, abortSignal: ab.signal });
+      if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
+      if (!resp.body || typeof resp.body.getReader !== "function") {
+        const raw = await resp.text(); const data = this._parseOrThrow(raw);
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        this._captureUsage(meta, data);
+        const parsed = this._parseToolCalls(fmt, data);
+        if (parsed.text) onDelta(parsed.text);
+        return { text: parsed.text, calls: parsed.calls, reasoning: parsed.reasoning || [] };
       }
+      const reader = resp.body.getReader(); const dec = new TextDecoder();
+      let buf = "", text = ""; const tc = {}; const racc = {};
+      while (true) {
+        if (shouldStop && shouldStop()) { try { await reader.cancel(); } catch (e) {} break; }
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+          if (!line || !line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim(); if (payload === "[DONE]") continue;
+          let j; try { j = JSON.parse(payload); } catch (e) { continue; }
+          if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+          this._captureUsage(meta, j);
+          const d = this._streamDelta(fmt, j); if (d) { text += d; onDelta(d); }
+          this._streamToolDelta(fmt, j, tc);
+          this._streamReasoningDelta(fmt, j, racc);
+        }
+      }
+      return { text, calls: this._finalizeToolCalls(tc), reasoning: this._finalizeReasoning(racc) };
+    } finally { ab.dispose(); }
+  },
+
+  // AbortController is NOT a global in the bootstrap sandbox (only the main
+  // window exposes it), but a window-created signal DOES abort the sandbox
+  // `fetch`. Always source it from the window — using a bare (absent)
+  // AbortController silently disabled both cancel and the request timeout.
+  _abortCtor() {
+    try { const w = Zotero.getMainWindow && Zotero.getMainWindow(); if (w && typeof w.AbortController === "function") return w.AbortController; } catch (e) {}
+    return (typeof AbortController === "function") ? AbortController : null;
+  },
+
+  // Bridge a `shouldStop()` flag to a real AbortController so a hung request
+  // (connection open, no bytes) can actually be cancelled: poll the flag and
+  // abort the moment it flips. Returns { signal, dispose }. Degrades to a no-op
+  // signal where AbortController/timers aren't available.
+  _abortGuard(shouldStop) {
+    const AC = this._abortCtor();
+    const ac = AC ? new AC() : null;
+    const win = Zotero.getMainWindow && Zotero.getMainWindow();
+    let iv = null;
+    if (ac && shouldStop && win && typeof win.setInterval === "function") {
+      iv = win.setInterval(() => { try { if (shouldStop()) { ac.abort(); if (win.clearInterval) win.clearInterval(iv); iv = null; } } catch (e) {} }, 150);
     }
-    return { text, calls: this._finalizeToolCalls(tc), reasoning: this._finalizeReasoning(racc) };
+    return { signal: ac ? ac.signal : undefined, dispose: () => { try { if (iv && win && win.clearInterval) win.clearInterval(iv); } catch (e) {} iv = null; } };
   },
   _safeJSON(s) { if (s && typeof s === "object") return s; try { return JSON.parse(s || "{}"); } catch (e) { return {}; } },
   _parseToolCalls(fmt, data) {
@@ -3788,15 +3815,25 @@ AIReader = {
     const retries = cfg.retries == null ? 1 : cfg.retries;
     let lastErr;
     for (let attempt = 0; attempt <= retries; attempt++) {
-      const ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+      const AC = this._abortCtor();
+      const ctrl = AC ? new AC() : null;
       const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, timeoutMs) : null;
+      // An external signal (the Stop button) aborts this fetch AND its in-flight
+      // response body — so a hung request with no bytes arriving can be killed.
+      let onExt = null;
+      if (ctrl && cfg.abortSignal) {
+        if (cfg.abortSignal.aborted) { try { ctrl.abort(); } catch (e) {} }
+        else { onExt = () => { try { ctrl.abort(); } catch (e) {} }; try { cfg.abortSignal.addEventListener("abort", onExt, { once: true }); } catch (e) {} }
+      }
       try {
         const resp = await fetch(url, ctrl ? Object.assign({}, opts, { signal: ctrl.signal }) : opts);
         if (timer) clearTimeout(timer);
-        return resp; // HTTP status handled by caller; not a network failure
+        return resp; // HTTP status handled by caller; not a network failure (leave onExt attached: it must still abort the streaming body)
       } catch (e) {
         if (timer) clearTimeout(timer);
+        try { if (onExt && cfg.abortSignal) cfg.abortSignal.removeEventListener("abort", onExt); } catch (e2) {}
         lastErr = e;
+        if (cfg.abortSignal && cfg.abortSignal.aborted) throw e; // user cancelled — don't retry
         if (attempt < retries) { this.log("fetch retry after network error: " + (e && e.message)); continue; }
       }
     }
@@ -3818,39 +3855,42 @@ AIReader = {
   async callLLMStream(messages, onDelta, shouldStop, meta) {
     meta = meta || {};
     const fmt = this._fmt();
-    // _fetchLLM retries only the connection (before any stream bytes), so a
-    // mid-stream drop is never silently retried into a duplicate answer.
-    const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, true) }, { timeoutMs: 600000, retries: 0 });
-    if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
-    if (!resp.body || typeof resp.body.getReader !== "function") {
-      const raw = await resp.text();
-      const data = this._parseOrThrow(raw);
-      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-      this._captureUsage(meta, data);
-      const c = this._extractContent(fmt, data) || ""; if (c) onDelta(c); return c;
-    }
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "", full = "";
-    while (true) {
-      if (shouldStop && shouldStop()) { try { await reader.cancel(); } catch (e) {} break; }
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-        if (!line || !line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (payload === "[DONE]") continue;
-        let j; try { j = JSON.parse(payload); } catch (e) { continue; }
-        if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
-        this._captureUsage(meta, j);
-        const d = this._streamDelta(fmt, j);
-        if (d) { full += d; onDelta(d); }
+    const ab = this._abortGuard(shouldStop); // Stop aborts even a stalled connection
+    try {
+      // _fetchLLM retries only the connection (before any stream bytes), so a
+      // mid-stream drop is never silently retried into a duplicate answer.
+      const resp = await this._fetchLLM(this._endpointFor(fmt), { method: "POST", headers: this._headersFor(fmt), body: this._bodyFor(fmt, messages, true) }, { timeoutMs: 600000, retries: 0, abortSignal: ab.signal });
+      if (!resp.ok) { const raw = await resp.text().catch(() => ""); throw this._fail(resp, raw); }
+      if (!resp.body || typeof resp.body.getReader !== "function") {
+        const raw = await resp.text();
+        const data = this._parseOrThrow(raw);
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        this._captureUsage(meta, data);
+        const c = this._extractContent(fmt, data) || ""; if (c) onDelta(c); return c;
       }
-    }
-    return full;
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", full = "";
+      while (true) {
+        if (shouldStop && shouldStop()) { try { await reader.cancel(); } catch (e) {} break; }
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+          if (!line || !line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (payload === "[DONE]") continue;
+          let j; try { j = JSON.parse(payload); } catch (e) { continue; }
+          if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+          this._captureUsage(meta, j);
+          const d = this._streamDelta(fmt, j);
+          if (d) { full += d; onDelta(d); }
+        }
+      }
+      return full;
+    } finally { ab.dispose(); }
   },
 
   // ------------------------------------------------- reader selection popup
