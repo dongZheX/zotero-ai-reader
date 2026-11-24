@@ -602,9 +602,19 @@ AIReader = {
     this._openPopMenu(state, state.genBtn, [
       { label: "存为笔记", desc: "把当前对话存为 Zotero 笔记", onClick: () => this.saveNote(body) },
       { label: "一页总结", desc: "结构化 Markdown，适合存笔记", onClick: () => this.generateShare(state, "onepager") },
-      { label: "HTML 分享页", desc: "图文并茂单文件网页，嵌入本文图表", onClick: () => this.generateShare(state, "html") },
+      { label: "HTML 分享页 ▸", desc: "图文并茂单文件网页，可选视觉风格", onClick: () => this._openShareThemeMenu(state) },
       { label: "全文翻译", desc: "双语对照，生成双语笔记/文件", onClick: () => this.generateTranslation(body) },
     ]);
+  },
+  // Second-level menu: pick a visual theme for the HTML share page. Remembers
+  // the last choice. Content generation is identical across themes — only CSS.
+  _openShareThemeMenu(state) {
+    const cur = this._shareThemeId();
+    this._openPopMenu(state, state.genBtn, this._shareThemes.map((t) => ({
+      label: (t.id === cur ? "● " : "○ ") + t.label,
+      desc: t.desc,
+      onClick: () => { try { Zotero.Prefs.set("aireader.shareTheme", t.id); } catch (e) {} this.generateShare(state, "html", t.id); },
+    })));
   },
   toggleOptMenu(body) {
     const state = this._bodyState.get(body);
@@ -3182,38 +3192,75 @@ AIReader = {
     });
   },
   _svgFencesToInline(html) { return (html || "").replace(/```svg\s*([\s\S]*?)```/gi, (_w, body) => String(body).trim()); },
-  _wrapHtmlDoc(title, bodyHtml) {
+  _wrapHtmlDoc(title, bodyHtml, themeId) {
     const safe = (title || "论文分享").replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
+    const theme = this._shareTheme(themeId || this._shareThemeId());
+    const css = this._shareBaseCss + "\n" + (theme.vars || "") + (theme.extra ? "\n" + theme.extra : "") + "\n" + this._shareDarkCss;
     return "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"UTF-8\"/>\n" +
       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>\n" +
-      "<title>" + safe + "</title>\n<style>\n" + this._SHARE_CSS + "\n</style>\n</head>\n<body>\n" +
+      "<meta name=\"color-scheme\" content=\"light dark\"/>\n" +
+      "<title>" + safe + "</title>\n<style>\n" + css + "\n</style>\n</head>\n<body>\n" +
       "<div class=\"container\">\n" + (bodyHtml || "") + "\n</div>\n</body>\n</html>\n";
   },
-  // Ported from ~/.claude/skills/tech-html-explainer/assets/base.css.
-  _SHARE_CSS: [
+  // ---- share-page theming: content markup is theme-agnostic (same classes);
+  // only CSS variables + a few per-theme tweaks change. Token-driven so every
+  // theme supports every component identically (generation quality is constant).
+  // Structure/components below style the SAME classes the section prompt emits.
+  _shareBaseCss: [
     "*{box-sizing:border-box;margin:0;padding:0;}",
-    "body{font-family:-apple-system,BlinkMacSystemFont,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;line-height:1.75;color:#2c3e50;background:linear-gradient(135deg,#f5f7fa 0%,#e8ecf3 100%);padding:24px;min-height:100vh;}",
-    ".container{max-width:1180px;margin:0 auto;}",
-    "header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:50px 40px;border-radius:18px;box-shadow:0 12px 40px rgba(102,126,234,.35);margin-bottom:28px;text-align:center;}",
-    "header h1{font-size:2.2em;margin-bottom:12px;letter-spacing:.5px;} header p{font-size:1.06em;opacity:.95;}",
-    ".tag{display:inline-block;background:rgba(255,255,255,.22);padding:4px 12px;border-radius:20px;margin:6px 5px 0;font-size:.86em;}",
-    "section{background:#fff;padding:34px 40px;border-radius:14px;box-shadow:0 4px 22px rgba(0,0,0,.06);margin-bottom:24px;}",
-    "h2{font-size:1.7em;color:#2c3e50;border-left:5px solid #667eea;padding-left:16px;margin-bottom:20px;}",
-    "h3{font-size:1.28em;color:#34495e;margin:22px 0 12px;} h3::before{content:'▸ ';color:#667eea;} h4{color:#667eea;margin:16px 0 8px;font-size:1.06em;}",
-    "p{margin-bottom:12px;} ul,ol{padding-left:22px;margin-bottom:12px;} li{margin:5px 0;}",
-    "code{background:#f4f6fa;color:#d63384;padding:2px 7px;border-radius:4px;font-family:'SF Mono',Consolas,monospace;font-size:.92em;}",
-    "table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.95em;} th,td{padding:10px 14px;text-align:left;border-bottom:1px solid #e3e8f0;} th{background:#f4f6fa;font-weight:600;} tr:hover td{background:#fafbfd;}",
-    ".pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;} .pros,.cons{padding:18px 22px;border-radius:10px;} .pros{background:#e7f8ee;border-left:4px solid #28a745;} .cons{background:#fdecea;border-left:4px solid #e74c3c;}",
-    ".pros h4{color:#28a745;margin-top:0;} .cons h4{color:#e74c3c;margin-top:0;}",
-    ".qa{background:#fffaf0;border:1px solid #ffe0b2;border-radius:10px;padding:16px 22px;margin:14px 0;} .qa .q{font-weight:600;color:#d35400;margin-bottom:8px;} .qa .q::before{content:'Q: ';color:#e67e22;} .qa .a{color:#34495e;padding-left:12px;border-left:3px solid #ffc107;} .qa .a::before{content:'A: ';font-weight:600;color:#27ae60;}",
-    ".highlight{background:linear-gradient(120deg,#fff9c4,#fff9c4) no-repeat;background-size:100% 40%;background-position:0 88%;padding:0 3px;}",
-    ".dim{font-family:'SF Mono',Consolas,monospace;font-size:.86em;background:#f8f9fc;border:1px dashed #c9d2e0;padding:12px 18px;border-radius:8px;margin:10px 0;white-space:pre-wrap;line-height:1.7;color:#475569;}",
-    ".toc{background:#f4f6fa;border-radius:10px;padding:20px 28px;margin-bottom:26px;} .toc ul{list-style:none;padding-left:0;} .toc li{padding:5px 0;border-bottom:1px dashed #d6dce5;} .toc li:last-child{border-bottom:none;} .toc a{color:#2c3e50;text-decoration:none;} .toc a:hover{color:#667eea;} .toc a::before{content:'◆ ';color:#667eea;font-size:.85em;}",
-    ".svg-wrap{background:#fff;border:1px solid #e3e8f0;border-radius:12px;padding:18px;margin:18px 0;overflow-x:auto;box-shadow:0 2px 10px rgba(0,0,0,.04);} .svg-wrap .caption{text-align:center;color:#7a8599;font-size:.88em;margin-top:10px;font-style:italic;}",
+    ":root{--maxw:1040px;--radius:14px;--gap:24px;--paper:#faf7f2;--surface:#fffdf9;--ink:#1e2430;--muted:#6b6256;--accent:#9a3412;--on-accent:#fff;--accent-soft:#f6ece1;--border:#e7ddcd;--mark:#fde68a;--ok:#15803d;--bad:#b91c1c;--code-bg:#f4efe6;--shadow-1:0 1px 2px rgba(30,20,10,.05),0 2px 10px rgba(30,20,10,.04);--font-head:Georgia,'Times New Roman','Songti SC',serif;--font-body:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;--font-mono:'SF Mono',ui-monospace,Consolas,monospace;}",
+    "html{-webkit-text-size-adjust:100%;}",
+    "body{font-family:var(--font-body);line-height:1.75;color:var(--ink);background:var(--paper);padding:clamp(16px,4vw,40px);min-height:100vh;}",
+    "@supports (text-wrap:pretty){body{text-wrap:pretty;}}",
+    ".container{max-width:var(--maxw);margin:0 auto;}",
+    "header{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(24px,5vw,44px);margin-bottom:var(--gap);box-shadow:var(--shadow-1);}",
+    "header h1{font-family:var(--font-head);font-weight:800;font-size:clamp(1.65rem,4.2vw,2.5rem);line-height:1.2;letter-spacing:-.01em;color:var(--ink);}",
+    ".paper-authors{color:var(--muted);margin-top:12px;font-size:.98rem;line-height:1.6;}",
+    ".paper-venue{color:var(--accent);font-weight:600;margin-top:4px;font-size:.95rem;}",
+    ".paper-badges{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;}",
+    ".paper-badges a{text-decoration:none;font-size:.8rem;font-weight:600;padding:5px 13px;border-radius:999px;border:1px solid var(--accent);color:var(--accent);background:transparent;transition:background .15s ease,color .15s ease;}",
+    ".paper-badges a:hover{background:var(--accent);color:var(--on-accent);}",
+    ".tldr{margin-top:18px;font-size:1.06rem;color:var(--ink);font-weight:500;}",
+    ".tags{margin-top:12px;} .tag{display:inline-block;background:var(--accent-soft);color:var(--accent);padding:3px 11px;border-radius:999px;margin:4px 6px 0 0;font-size:.8rem;font-weight:600;}",
+    ".paper-abstract{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);font-size:.95rem;color:var(--ink);}",
+    ".paper-abstract .lbl,.toc .lbl{display:block;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}",
+    ".toc{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 26px;margin-bottom:var(--gap);box-shadow:var(--shadow-1);}",
+    ".toc ul{list-style:none;} .toc li{padding:5px 0;border-bottom:1px solid var(--border);} .toc li:last-child{border-bottom:none;} .toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid transparent;} .toc a:hover{color:var(--accent);border-bottom-color:var(--accent);}",
+    "section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(22px,4vw,38px);margin-bottom:var(--gap);box-shadow:var(--shadow-1);}",
+    "h2{font-family:var(--font-head);font-size:clamp(1.3rem,3vw,1.72rem);color:var(--ink);margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid var(--accent);}",
+    "h3{font-size:1.2rem;color:var(--ink);margin:22px 0 10px;font-weight:700;}",
+    "h4{color:var(--accent);margin:16px 0 8px;font-size:1rem;font-weight:700;}",
+    "p{margin-bottom:12px;} ul,ol{padding-left:22px;margin-bottom:12px;} li{margin:5px 0;} a{color:var(--accent);} strong{color:var(--ink);}",
+    "code{background:var(--code-bg);color:var(--accent);padding:2px 7px;border-radius:5px;font-family:var(--font-mono);font-size:.9em;}",
+    "table{width:100%;border-collapse:collapse;margin:16px 0;font-size:.94em;} th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);} th{background:var(--accent-soft);font-weight:700;color:var(--ink);}",
+    ".pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;} .pros,.cons{padding:18px 20px;border-radius:10px;border:1px solid var(--border);} .pros{background:color-mix(in srgb,var(--ok) 9%,transparent);border-color:color-mix(in srgb,var(--ok) 30%,var(--border));} .cons{background:color-mix(in srgb,var(--bad) 9%,transparent);border-color:color-mix(in srgb,var(--bad) 30%,var(--border));}",
+    ".pros h4{color:var(--ok);margin-top:0;} .cons h4{color:var(--bad);margin-top:0;}",
+    ".qa{background:var(--accent-soft);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin:14px 0;} .qa .q{font-weight:700;color:var(--ink);margin-bottom:8px;} .qa .q::before{content:'Q ';color:var(--accent);font-weight:800;} .qa .a{color:var(--ink);padding-left:14px;border-left:3px solid var(--accent);} .qa .a::before{content:'A ';font-weight:800;color:var(--accent);}",
+    ".highlight{background:linear-gradient(transparent 62%,var(--mark) 0);padding:0 2px;}",
+    ".dim{font-family:var(--font-mono);font-size:.86em;background:var(--code-bg);border:1px dashed var(--border);padding:12px 18px;border-radius:8px;margin:10px 0;white-space:pre-wrap;line-height:1.7;color:var(--muted);}",
+    ".svg-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin:18px 0;overflow-x:auto;box-shadow:var(--shadow-1);} .svg-wrap .caption{text-align:center;color:var(--muted);font-size:.86em;margin-top:10px;}",
     "svg{display:block;margin:0 auto;max-width:100%;height:auto;}",
-    ".paper-fig{background:#fff;border:1px solid #e3e8f0;border-radius:12px;padding:22px;margin:18px 0;box-shadow:0 2px 10px rgba(0,0,0,.04);} .paper-fig img{display:block;max-width:100%;height:auto;margin:0 auto;border-radius:6px;background:#fafbfd;} .paper-fig .caption{text-align:center;color:#475569;font-size:.9em;margin-top:12px;}",
-    "@media (max-width:768px){section{padding:22px 18px;} .pros-cons{grid-template-columns:1fr;}}",
+    ".paper-fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin:18px 0;box-shadow:var(--shadow-1);} .paper-fig img{display:block;max-width:100%;height:auto;margin:0 auto;border-radius:6px;} .paper-fig .caption{text-align:center;color:var(--muted);font-size:.88em;margin-top:12px;}",
+    "footer{text-align:center;color:var(--muted);font-size:.82em;margin:8px 0 0;}",
+    "@media (max-width:768px){.pros-cons{grid-template-columns:1fr;}}",
+    "@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important;}}",
   ].join("\n"),
+  // Shared dark remap: neutrals flip, each theme keeps its own --accent.
+  _shareDarkCss: "@media (prefers-color-scheme:dark){:root{--paper:#0f1216;--surface:#171b22;--ink:#e6ecf3;--muted:#98a4b5;--border:#2a313c;--code-bg:#1c222b;--accent-soft:color-mix(in srgb,var(--accent) 16%,#171b22);--shadow-1:0 1px 2px rgba(0,0,0,.4),0 2px 12px rgba(0,0,0,.35);}}",
+  _shareThemes: [
+    { id: "journal", label: "期刊风", desc: "Nature/IEEE：衬线标题、暖纸张、墨色+单一强调",
+      vars: ":root{--accent:#9a3412;--accent-soft:#f6ece1;--paper:#faf7f2;--surface:#fffdf9;--ink:#1e2430;--muted:#6b6256;--border:#e7ddcd;--mark:#fde68a;--font-head:Georgia,'Times New Roman','Songti SC',serif;}" },
+    { id: "modern", label: "现代产品", desc: "中性灰 + 靛蓝强调、无衬线、微阴影卡片",
+      vars: ":root{--maxw:1080px;--radius:16px;--paper:#f6f8fb;--surface:#ffffff;--ink:#0f172a;--muted:#64748b;--accent:#4f46e5;--on-accent:#fff;--accent-soft:#eef2ff;--border:#e6eaf1;--mark:#c7d2fe;--ok:#059669;--bad:#dc2626;--code-bg:#f1f5f9;--shadow-1:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.06);--font-head:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;--font-body:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;}",
+      extra: "h2{border-bottom:none;position:relative;padding-left:15px;} h2::before{content:'';position:absolute;left:0;top:3px;bottom:5px;width:4px;border-radius:3px;background:var(--accent);}" },
+    { id: "swiss", label: "瑞士网格", desc: "黑白强网格 + 红强调、锐角、极简",
+      vars: ":root{--maxw:1040px;--radius:0px;--paper:#ffffff;--surface:#ffffff;--ink:#0a0a0a;--muted:#555555;--accent:#e4002b;--on-accent:#fff;--accent-soft:#f2f2f2;--border:#0a0a0a;--mark:#ffe600;--ok:#0a0a0a;--bad:#e4002b;--code-bg:#f2f2f2;--shadow-1:none;--font-head:'Helvetica Neue','Arial Narrow',Arial,'PingFang SC',sans-serif;--font-body:'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif;}",
+      extra: "header,.toc,section,.svg-wrap,.paper-fig{border-width:2px;} h2{border-bottom-width:3px;} h1,h2{letter-spacing:-.02em;} .tag,.paper-badges a,.pros,.cons,.qa,.dim,code,.svg-wrap,.paper-fig{border-radius:0;}" },
+    { id: "warm", label: "暖笔记", desc: "米黄手账质感、暖强调、圆润",
+      vars: ":root{--maxw:1000px;--radius:18px;--paper:#fdf6e9;--surface:#fffdf7;--ink:#3f3626;--muted:#8a7a5c;--accent:#c2691c;--on-accent:#fff;--accent-soft:#faecd4;--border:#ece0c6;--mark:#ffe4a3;--ok:#4d7c0f;--bad:#c2410c;--code-bg:#f7eed9;--shadow-1:0 2px 14px rgba(120,90,30,.09);--font-head:'Yuanti SC','PingFang SC','Hiragino Sans GB',-apple-system,sans-serif;--font-body:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;}" },
+  ],
+  _shareTheme(id) { return this._shareThemes.find((t) => t.id === id) || this._shareThemes[0]; },
+  _shareThemeId() { const p = ((this.getPref("shareTheme") || "") + "").trim(); return this._shareThemes.some((t) => t.id === p) ? p : this._shareThemes[0].id; },
 
   // ---- rich HTML built section-by-section (depth + per-section progress) ----
   _shareOutlinePrompt(lang) {
@@ -3242,17 +3289,60 @@ AIReader = {
       "要展示论文自己的图表时用 [[fig:<id>]] 占位（会被替换成真实图片）。可用图表清单：\n" + (figList || "（无）") + "\n" +
       "关键论断后可用 [B<id>]；不臆造、图表不编造。" + this._shareStyleNote();
   },
-  _shareHeaderHtml(o) {
-    const tags = (o.tags || []).map((t) => '<span class="tag">' + this._escapeHTML(t) + "</span>").join("");
-    return "<header><h1>" + this._escapeHTML(o.title || "论文分享") + "</h1>" + (o.tldr ? "<p>" + this._escapeHTML(o.tldr) + "</p>" : "") + tags + "</header>";
+  // Authoritative paper metadata from the Zotero item (NOT model-generated), for
+  // the header info card: title, authors, venue·year, arXiv/DOI/URL links, abstract.
+  _paperInfo(state) {
+    let it = state && state.item;
+    try { if (it && it.isAttachment && it.isAttachment() && it.parentItem) it = it.parentItem; } catch (e) {}
+    const get = (f) => { try { return (it && it.getField && it.getField(f)) || ""; } catch (e) { return ""; } };
+    let authors = [];
+    try {
+      const cr = (it && it.getCreators && it.getCreators()) || [];
+      authors = cr.map((c) => ((c.firstName ? c.firstName + " " : "") + (c.lastName || c.name || "")).trim()).filter(Boolean);
+    } catch (e) {}
+    const date = get("date") || "";
+    const ym = /(\d{4})/.exec(date); const year = ym ? ym[1] : "";
+    const venue = get("publicationTitle") || get("conferenceName") || get("proceedingsTitle") || get("publisher") || get("repository") || "";
+    const extra = get("extra") || ""; const url = get("url") || ""; const title = get("title") || "";
+    const doi = (get("DOI") || (/10\.\d{4,9}\/[^\s"]+/.exec(extra) || [])[0] || "").trim();
+    const am = /arxiv[:/ ]?\s*(\d{4}\.\d{4,5})/i.exec(extra + " " + url + " " + title);
+    const arxiv = am ? am[1] : "";
+    const abstract = get("abstractNote") || "";
+    return { title, authors, year, venue, doi, arxiv, url, abstract };
+  },
+  _attr(s) { return this._escapeHTML(String(s || "")).replace(/"/g, "&quot;"); },
+  _shareHeaderHtml(o, info) {
+    info = info || {};
+    const esc = (s) => this._escapeHTML(s);
+    const title = esc(info.title || o.title || "论文分享");
+    let h = "<header><h1>" + title + "</h1>";
+    if (info.authors && info.authors.length) {
+      const names = info.authors.slice(0, 12).map(esc).join("、") + (info.authors.length > 12 ? " 等" : "");
+      h += '<div class="paper-authors">' + names + "</div>";
+    }
+    const vy = [info.venue, info.year].filter(Boolean).map(esc).join(" · ");
+    if (vy) h += '<div class="paper-venue">' + vy + "</div>";
+    const badges = [];
+    if (info.arxiv) badges.push('<a href="https://arxiv.org/abs/' + this._attr(info.arxiv) + '" target="_blank" rel="noopener">arXiv ' + esc(info.arxiv) + "</a>");
+    if (info.doi) badges.push('<a href="https://doi.org/' + this._attr(info.doi) + '" target="_blank" rel="noopener">DOI</a>');
+    if (info.url && !info.arxiv) badges.push('<a href="' + this._attr(info.url) + '" target="_blank" rel="noopener">原文链接</a>');
+    if (badges.length) h += '<div class="paper-badges">' + badges.join("") + "</div>";
+    if (o.tldr) h += '<p class="tldr">' + esc(o.tldr) + "</p>";
+    const tags = (o.tags || []).map((t) => '<span class="tag">' + esc(t) + "</span>").join("");
+    if (tags) h += '<div class="tags">' + tags + "</div>";
+    if (info.abstract) {
+      const ab = info.abstract.length > 1200 ? info.abstract.slice(0, 1200) + "…" : info.abstract;
+      h += '<div class="paper-abstract"><span class="lbl">摘要 Abstract</span>' + esc(ab) + "</div>";
+    }
+    return h + "</header>";
   },
   _shareTocHtml(o) {
-    return '<div class="toc"><ul>' + (o.sections || []).map((s) => '<li><a href="#' + this._escapeHTML(s.id) + '">' + this._escapeHTML(s.title) + "</a></li>").join("") + "</ul></div>";
+    return '<div class="toc"><span class="lbl">目录 Contents</span><ul>' + (o.sections || []).map((s) => '<li><a href="#' + this._attr(s.id) + '">' + this._escapeHTML(s.title) + "</a></li>").join("") + "</ul></div>";
   },
   _stripHtmlFence(s) { return (s || "").trim().replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim(); },
-  _assembleShareHtml(o, sectionHtmls) {
-    const footer = '<footer style="text-align:center;color:#7a8599;font-size:.85em;margin:8px 0 0;">由 AI Reader 生成</footer>';
-    return this._shareHeaderHtml(o) + "\n" + this._shareTocHtml(o) + "\n" + sectionHtmls.join("\n") + "\n" + footer;
+  _assembleShareHtml(o, sectionHtmls, info) {
+    const footer = '<footer>由 AI Reader 生成</footer>';
+    return this._shareHeaderHtml(o, info) + "\n" + this._shareTocHtml(o) + "\n" + sectionHtmls.join("\n") + "\n" + footer;
   },
   _figureListText(blocks) {
     const figs = (blocks || []).filter((b) => b.type === "image" || b.type === "table" || b.type === "figure").slice(0, 20);
@@ -3283,7 +3373,7 @@ AIReader = {
 
   // Generate a shareable artifact from the whole paper. Its own streamed turn;
   // does NOT push into chat history / synced note (it's a separate product).
-  async generateShare(state, fmtId) {
+  async generateShare(state, fmtId, themeId) {
     if (!this.requireKey(state)) return;
     if (state.streaming) return;
     const spec = this._shareFormats().find((f) => f.id === fmtId);
@@ -3296,7 +3386,7 @@ AIReader = {
     try {
       await this.ensureBlocks(state);
       const lang = this.getPref("language") || "中文";
-      if (fmtId === "html") { await this._runHtmlShare(state, bubble, msg, lang); this.setStatus(state, "", ""); return; }
+      if (fmtId === "html") { await this._runHtmlShare(state, bubble, msg, lang, themeId); this.setStatus(state, "", ""); return; }
       // one-pager: single streamed pass (readable Markdown). Show a spinner +
       // label while prefilling / streaming so it never looks like a dead box.
       bubble.classList.remove("aireader-streaming");
@@ -3329,7 +3419,7 @@ AIReader = {
   // Rich HTML, built section-by-section: plan an outline, then generate each
   // section with its own focused context — deeper output + a live checklist of
   // which part is being written.
-  async _runHtmlShare(state, bubble, msg, lang) {
+  async _runHtmlShare(state, bubble, msg, lang, themeId) {
     const blocks = state.blocks;
     const figList = this._figureListText(blocks);
     this._startWait(state, "正在规划结构…"); bubble.textContent = "正在规划结构…";
@@ -3343,7 +3433,7 @@ AIReader = {
       let one = ""; try { one = await this.callLLM([{ role: "system", content: this._shareFormats().find((f) => f.id === "html").buildSystemPrompt(lang) }, { role: "user", content: "论文内容：\n\n" + planCtx }]); } catch (e) { this.log("html fallback: " + e); }
       this._stopWait(state);
       bubble.classList.remove("aireader-streaming"); bubble.textContent = "";
-      await this._finishShareHtml(state, bubble, msg, { title: this._shareBaseName(state), tldr: "", tags: [], sections: [] }, [this._stripHtmlFence(one)]);
+      await this._finishShareHtml(state, bubble, msg, { title: this._shareBaseName(state), tldr: "", tags: [], sections: [] }, [this._stripHtmlFence(one)], themeId);
       return;
     }
     bubble.classList.remove("aireader-streaming"); bubble.textContent = "";
@@ -3368,7 +3458,7 @@ AIReader = {
       rows[i].textContent = "✓ " + s.title; rows[i].classList.remove("aireader-share-step-cur"); rows[i].classList.add("aireader-share-step-done");
     }
     if (state.cancel) { bubble.appendChild(this._el(doc, "div", "aireader-meta", "（已停止）")); return; }
-    await this._finishShareHtml(state, bubble, msg, outline, sectionHtmls);
+    await this._finishShareHtml(state, bubble, msg, outline, sectionHtmls, themeId);
   },
   async _finishShareText(state, bubble, msg, spec, text) {
     this.enhanceMessage(state, bubble, text);
@@ -3388,17 +3478,18 @@ AIReader = {
       catch (e) { save.textContent = "保存失败"; this.log("writeShareFile: " + e); }
     });
   },
-  async _finishShareHtml(state, bubble, msg, outline, sectionHtmls) {
+  async _finishShareHtml(state, bubble, msg, outline, sectionHtmls, themeId) {
     this.setStatus(state, "正在嵌入图表…", "busy");
-    const fragment = this._assembleShareHtml(outline, sectionHtmls);
+    const info = this._paperInfo(state);
+    const fragment = this._assembleShareHtml(outline, sectionHtmls, info);
     let body = await this._embedFigures(fragment, async (id) => {
       const b = (state.blocks || []).find((x) => x.id === id);
       if (!b) return null;
       try { return await this.renderRegionDataURI(state.attachment, b); } catch (e) { return null; }
     });
     body = this._svgFencesToInline(body);
-    const title = outline.title || this._shareBaseName(state);
-    const html = this._wrapHtmlDoc(title, body);
+    const title = (info && info.title) || outline.title || this._shareBaseName(state);
+    const html = this._wrapHtmlDoc(title, body, themeId || this._shareThemeId());
     const doc = state.doc;
     bubble.appendChild(this._el(doc, "div", "aireader-meta", "HTML 分享页已生成（" + sectionHtmls.length + " 个章节）。"));
     const row = this._el(doc, "div", "aireader-actions"); msg.appendChild(row);

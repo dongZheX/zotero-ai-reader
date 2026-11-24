@@ -48,7 +48,7 @@ Two things set it apart from a plain chat box:
 | **Full-text translation** | Translate the whole document into your output language — segmented, translated concurrently with neighbour context so terms stay consistent, delivered as a bilingual child attachment you open in the reader (progress bar while it runs). |
 | **Web snapshots & HTML** | Snapshots / HTML attachments (not just PDFs) can be summarized, chatted with, and translated — read from Zotero's `.zotero-ft-cache`. Citations on a snapshot jump via the reader's full-text search. |
 | **Multi-paper compare** | Add papers to a compare basket and ask across them at once. |
-| **Share materials** | Generate a one-page Markdown summary or a section-by-section illustrated HTML share page (embeds the paper's own figures, hand-drawn SVG, Q&A cards). |
+| **Share materials** | Generate a one-page Markdown summary or a section-by-section illustrated HTML share page (embeds the paper's own figures, hand-drawn SVG, Q&A cards). The HTML page leads with an authoritative paper-info card (title, authors, venue·year, clickable arXiv/DOI, abstract — pulled from the Zotero item, not the model) and ships **4 switchable visual themes** (journal / modern / swiss / warm) with dark-mode support. |
 | **Multi-machine chat sync** | Conversations persist into a Zotero-synced data note, so history follows you across machines. |
 | **Selection popup** | Select text in the reader to quote it, explain it (streaming, with copy and "write to annotation"), or translate it. |
 | **Your notes as context** | Reads your existing highlights and notes, so you can ask "summarize my highlights". |
