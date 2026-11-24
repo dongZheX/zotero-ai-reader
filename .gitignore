@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ── Project (Zotero plugin / JS) ───────────────────────────
+.DS_Store
+node_modules/
+# macOS "duplicate" copies (e.g. ai-reader.xpi 副本)
+*副本*
+* copy*
+# dev-bridge scratch (written to the Zotero data dir, not here — guard anyway)
+aireader-dev/

@@ -9,6 +9,7 @@ AIReader = {
   _panels: new Map(),      // attachment.key -> state (latest live panel)
   _chatStore: new Map(),   // attachment.key -> [{role, content}]
   _blockStore: new Map(),  // attachment.key -> blocks[]
+  BLOCK_CACHE_VERSION: 4,  // bump when the block schema changes so stale disk caches are re-extracted
   _histSummary: new Map(), // attachment.key -> rolling summary of compacted older turns
   _readStore: new Map(),   // attachment.key -> Map(sectionIndex -> {title,text})  — read sections
   _figStore: new Map(),    // attachment.key -> Map(figId -> {page,kind,desc})      — viewed figures
@@ -126,6 +127,7 @@ AIReader = {
     this.registerSection();
     await this.registerPrefs();
     this.registerReaderPopup();
+    try { this.startDevBridge(); } catch (e) { this.log("devBridge start: " + e); }
   },
 
   unregisterAll() {
@@ -133,6 +135,80 @@ AIReader = {
     try { if (this._prefPaneID) Zotero.PreferencePanes.unregister(this._prefPaneID); } catch (e) {}
     try { if (this._selectionHandler) Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this._selectionHandler); } catch (e) {}
     try { if (this._ctxHandler) { Zotero.Reader.unregisterEventListener("createViewContextMenu", this._ctxHandler); Zotero.Reader.unregisterEventListener("createSelectorContextMenu", this._ctxHandler); } } catch (e) {}
+    try { this.stopDevBridge(); } catch (e) {}
+  },
+
+  // ---------------------------------------------------------- dev bridge
+  // OPT-IN developer tool (pref extensions.zotero.aireader.devBridge, default
+  // off). Polls <DataDir>/aireader-dev/cmd.json for { seq, code } and runs the
+  // code as an async function body with `this` === AIReader — i.e. in the live
+  // plugin scope, with full access to the reader, blocks and DOM — then writes
+  // { seq, ok, result|error, logs } to out.json. This gives an external process
+  // a real REPL into a running Zotero: inspect state, exercise a feature, and
+  // even hot-redefine methods (this.navigateTo = async function(){…}) without
+  // reinstalling the xpi. Never touches the network; only this machine's files.
+  startDevBridge() {
+    if (this._devTimer) return;
+    if (!Zotero.Prefs.get("aireader.devBridge")) return;
+    const win = Zotero.getMainWindow && Zotero.getMainWindow();
+    if (!win || typeof win.setInterval !== "function") { this.log("devBridge: no window timer"); return; }
+    const dir = PathUtils.join(Zotero.DataDirectory.dir, "aireader-dev");
+    const cmdPath = PathUtils.join(dir, "cmd.json");
+    const outPath = PathUtils.join(dir, "out.json");
+    this._devWin = win;
+    IOUtils.makeDirectory(dir, { ignoreExisting: true }).catch(() => {});
+    let lastSeq = -1;
+    const tick = async () => {
+      let cmd;
+      try {
+        if (!(await IOUtils.exists(cmdPath))) return;
+        cmd = JSON.parse(await IOUtils.readUTF8(cmdPath));
+      } catch (e) { return; }
+      if (!cmd || typeof cmd.seq !== "number" || cmd.seq === lastSeq) return;
+      lastSeq = cmd.seq;
+      const logs = [];
+      const origLog = this.log;
+      this.log = (m) => { try { logs.push(String(m)); } catch (e) {} try { origLog.call(AIReader, m); } catch (e) {} };
+      let out;
+      try {
+        const fn = new Function("Zotero", "PathUtils", "IOUtils", "Services", "log",
+          "return (async () => {\n" + String(cmd.code || "") + "\n})();");
+        const result = await fn.call(this, Zotero, PathUtils, IOUtils, (typeof Services !== "undefined" ? Services : null), this.log);
+        out = { seq: cmd.seq, ok: true, result: this._devSafe(result), logs: logs, ts: Date.now() };
+      } catch (e) {
+        out = { seq: cmd.seq, ok: false, error: String((e && e.stack) || e), logs: logs, ts: Date.now() };
+      } finally {
+        this.log = origLog;
+      }
+      try { await IOUtils.writeUTF8(outPath, JSON.stringify(out)); } catch (e) { origLog.call(AIReader, "devBridge write: " + e); }
+    };
+    this._devTimer = win.setInterval(() => { tick().catch(() => {}); }, 500);
+    this.log("devBridge ON → " + dir);
+  },
+  stopDevBridge() {
+    try { if (this._devTimer && this._devWin) this._devWin.clearInterval(this._devTimer); } catch (e) {}
+    this._devTimer = null; this._devWin = null;
+  },
+  // JSON-safe snapshot: drop functions, name DOM nodes, cap depth/size, guard
+  // cycles — so whatever dev code returns serializes without throwing.
+  _devSafe(v, depth, seen) {
+    depth = depth || 0; seen = seen || new WeakSet();
+    if (v === null || v === undefined) return v;
+    const t = typeof v;
+    if (t === "function") return "[fn " + (v.name || "anonymous") + "]";
+    if (t !== "object") return (t === "bigint" ? String(v) : v);
+    if (v.nodeType && v.nodeName) return "[Node " + v.nodeName + (v.className ? "." + v.className : "") + "]";
+    if (seen.has(v)) return "[circular]";
+    seen.add(v);
+    if (depth > 6) return "[…]";
+    if (Array.isArray(v)) return v.slice(0, 500).map((x) => this._devSafe(x, depth + 1, seen));
+    const o = {}; let n = 0;
+    for (const k in v) {
+      if (n++ > 200) { o["…"] = "truncated"; break; }
+      let val; try { val = v[k]; } catch (e) { o[k] = "[getter err]"; continue; }
+      try { o[k] = this._devSafe(val, depth + 1, seen); } catch (e) { o[k] = "[err]"; }
+    }
+    return o;
   },
 
   registerSection() {
@@ -859,7 +935,28 @@ AIReader = {
     if (!text || !text.trim()) return null;
     const paras = text.split(/\n\s*\n|\n/).map((t) => t.replace(/[ \t ]+/g, " ").trim()).filter((t) => t.length > 1);
     let id = 0;
-    return paras.map((t) => ({ id: id++, type: "paragraph", text: t.length > 2000 ? t.slice(0, 2000) + "…" : t, position: null, pageLabel: "?", pageHeight: 792 }));
+    // Snapshots/HTML have no page geometry, so there's no PDF-style position to
+    // jump to. Keep a distinctive text anchor per block instead; citations open
+    // the snapshot and full-text-search to it (see navigateTo). `anchor:true`
+    // lets the renderer draw a clickable badge even though position==null.
+    return paras.map((t) => {
+      const body = t.length > 2000 ? t.slice(0, 2000) + "…" : t;
+      return { id: id++, type: "paragraph", text: body, position: null, anchor: true, query: this._searchAnchor(t), pageLabel: "", pageHeight: 792 };
+    });
+  },
+
+  // A contiguous, distinctive substring of a block, used to full-text-search a
+  // snapshot/EPUB to the right spot. Collapse whitespace and take the first
+  // ~80 chars on a word boundary — long enough to be unique, short enough that
+  // the ft-cache text and the live DOM text still match it verbatim.
+  _searchAnchor(t) {
+    const s = String(t || "").replace(/\s+/g, " ").trim();
+    if (!s) return "";
+    if (s.length <= 80) return s;
+    let cut = s.slice(0, 80);
+    const sp = cut.lastIndexOf(" ");
+    if (sp > 40) cut = cut.slice(0, sp);
+    return cut;
   },
 
   async extractBlocksFallback(attachmentID) {
@@ -870,7 +967,10 @@ AIReader = {
     if (!text) return null;
     const paras = text.split(/\n\s*\n|\f/).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
     let id = 0;
-    return paras.map((t) => ({ id: id++, type: "paragraph", text: t.length > 2000 ? t.slice(0, 2000) + "…" : t, position: null, pageLabel: "?", pageHeight: 792 }));
+    return paras.map((t) => {
+      const body = t.length > 2000 ? t.slice(0, 2000) + "…" : t;
+      return { id: id++, type: "paragraph", text: body, position: null, anchor: true, query: this._searchAnchor(t), pageLabel: "", pageHeight: 792 };
+    });
   },
 
   // --------------------------------------------------------- context build
@@ -1662,9 +1762,15 @@ AIReader = {
         let any = false;
         for (const idStr of (m[4].match(/\d+/g) || [])) {
           const block = byId.get(Number(idStr));
-          if (!block || !block.position) continue;
+          // A block is navigable if it has a geometric position (PDF) OR any text
+          // we can full-text-search to (snapshot/EPUB/HTML). Don't depend on the
+          // `anchor` flag — blocks cached by an older build won't have it.
+          if (!block) continue;
+          const canFind = !block.position && (block.query || (block.text && block.text.trim()));
+          if (!block.position && !canFind) continue;
           if (any) container.appendChild(doc.createTextNode(" "));
-          const badge = this._el(doc, "a", "aireader-ref", "p" + block.pageLabel);
+          const label = block.position ? ("p" + block.pageLabel) : "🔗 原文";
+          const badge = this._el(doc, "a", "aireader-ref", label);
           badge.addEventListener("click", (ev) => { ev.preventDefault(); AIReader.navigateTo(state.attachment.id, block); });
           badge.addEventListener("mouseenter", (ev) => this.showPreview(state, ev, block));
           badge.addEventListener("mouseleave", () => this.hidePreview(state));
@@ -2761,8 +2867,103 @@ AIReader = {
   },
 
   async navigateTo(attachmentID, block) {
-    if (!block || !block.position) return;
-    try { await Zotero.Reader.open(attachmentID, { position: block.position }); } catch (e) { this.log("navigate error: " + e); }
+    if (!block) return;
+    try {
+      // PDF: precise geometric jump.
+      if (block.position) { await Zotero.Reader.open(attachmentID, { position: block.position }); return; }
+      // Snapshot/EPUB/HTML: no geometry. Jump by text, using only PUBLIC reader
+      // APIs — open the reader, then drive `reader.navigate({position})` with a
+      // TextPositionSelector (Zotero's own annotation-position format, which its
+      // navigate() scrolls to and does the cross-compartment marshalling for us).
+      // Works for any positionless block with text, not just `anchor`-flagged ones.
+      const q = block.query || this._searchAnchor(block.text);
+      if (!q) return;
+      let reader = await Zotero.Reader.open(attachmentID);
+      // open() returns undefined when it just re-selected an already-open tab;
+      // recover the live reader instance (public getByTabID) so we can drive it.
+      if (!reader) reader = this._findOpenReader(attachmentID);
+      if (!reader) return;
+      try { if (reader._initPromise) await reader._initPromise; } catch (e) {}
+      const ok = this._snapshotJump(reader, q);
+      // The content may not be laid out yet right after open — retry once.
+      if (!ok) { try { (reader._window || Zotero.getMainWindow()).setTimeout(() => this._snapshotJump(reader, q), 450); } catch (e) {} }
+    } catch (e) { this.log("navigate error: " + e); }
+  },
+
+  // Locate an already-open reader instance for an attachment via the PUBLIC
+  // Zotero.Reader.getByTabID + the window's tab registry.
+  _findOpenReader(attachmentID) {
+    try {
+      const R = Zotero.Reader;
+      if (R && typeof R.getByTabID === "function" && Zotero.getMainWindow) {
+        const tabs = Zotero.getMainWindow().Zotero_Tabs;
+        const tabID = tabs && tabs.getTabIDByItemID && tabs.getTabIDByItemID(attachmentID);
+        if (tabID) { const r = R.getByTabID(tabID); if (r) return r; }
+      }
+    } catch (e) { this.log("findOpenReader: " + e); }
+    return null;
+  },
+
+  // Scroll a snapshot/EPUB/HTML reader to `query` using the PUBLIC
+  // `reader.navigate({ position })`. Zotero exposes no public text-search API, so
+  // we build a TextPositionSelector — its `start`/`end` are offsets into the
+  // concatenated text nodes of the rendered body (what Zotero's own
+  // textPositionToRange counts). Computing them is the one place we must read the
+  // rendered document; that read is isolated in `_readerContentDoc` (feature-
+  // detected, with a fallback) and nothing else here touches reader internals.
+  // Returns false (→ caller retries) if the doc or the text can't be resolved.
+  _snapshotJump(reader, query) {
+    try {
+      const doc = this._readerContentDoc(reader);
+      if (!doc || !doc.body) { this.log("snapshotJump: no content doc"); return false; }
+      const sel = this._textPositionFor(doc.body, query);
+      if (!sel) { this.log("snapshotJump: text not found"); return false; }
+      reader.navigate({ position: sel }); // PUBLIC API; navigate() does its own cloneInto
+      return true;
+    } catch (e) { this.log("snapshotJump: " + e); return false; }
+  },
+
+  // The one place that reads the reader's rendered document (to compute a text
+  // offset). Isolated + feature-detected: tries the primary view's document,
+  // then a nested content iframe reachable from the reader window. Returns null
+  // if neither is available (caller degrades gracefully).
+  _readerContentDoc(reader) {
+    try {
+      const ir = reader && reader._internalReader;
+      const pv = ir && (ir._primaryView || (typeof ir._getActiveView === "function" && ir._getActiveView()));
+      if (pv && pv._iframeDocument && pv._iframeDocument.body) return pv._iframeDocument;
+      const rw = reader && reader._iframeWindow;
+      const inner = rw && rw.document && rw.document.querySelector && rw.document.querySelector("iframe");
+      if (inner && inner.contentDocument && inner.contentDocument.body) return inner.contentDocument;
+    } catch (e) { this.log("contentDoc: " + e); }
+    return null;
+  },
+
+  // Build a TextPositionSelector { start, end } locating `query` in bodyEl's
+  // concatenated text-node content (the exact text Zotero's textPositionToRange
+  // walks). Exact match first; else a whitespace-insensitive match that maps the
+  // collapsed hit back to raw offsets, so English text whose DOM spacing differs
+  // from the stored anchor still resolves. Pure — unit-tested in test/snapshot.js.
+  _textPositionFor(bodyEl, query) {
+    const raw = (bodyEl && bodyEl.textContent) || "";
+    const q = String(query || "").trim();
+    if (!q || !raw) return null;
+    let start = raw.indexOf(q);
+    if (start >= 0) return { type: "TextPositionSelector", start: start, end: start + q.length };
+    // whitespace-insensitive fallback: collapse runs of whitespace to one space,
+    // remembering each kept char's raw index, then map the collapsed hit back.
+    let norm = "", prevWs = false; const map = [];
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i];
+      if (/\s/.test(c)) { if (prevWs) continue; norm += " "; map.push(i); prevWs = true; }
+      else { norm += c; map.push(i); prevWs = false; }
+    }
+    const nq = q.replace(/\s+/g, " ").trim();
+    const ni = norm.indexOf(nq);
+    if (ni < 0) return null;
+    const endNorm = ni + nq.length - 1;
+    const endRaw = (map[endNorm] != null ? map[endNorm] : raw.length - 1) + 1;
+    return { type: "TextPositionSelector", start: map[ni], end: endRaw };
   },
 
   // ---------------------------------------------------- annotation writing
@@ -3890,6 +4091,11 @@ AIReader = {
       const { path } = this.cachePath(attachment);
       if (!(await IOUtils.exists(path))) return null;
       const obj = JSON.parse(await IOUtils.readUTF8(path));
+      // Reject caches from an older block schema so they get re-extracted with
+      // the current code (e.g. snapshot blocks gained a text `anchor` in v4 —
+      // without this, a doc cached by an older build keeps anchorless blocks and
+      // its citations stay unclickable).
+      if (obj.version !== this.BLOCK_CACHE_VERSION) return null;
       const hash = await attachment.attachmentHash;
       if (hash && obj.hash && hash !== obj.hash) return null;
       return obj;
@@ -3901,7 +4107,7 @@ AIReader = {
       const { dir, path } = this.cachePath(attachment);
       await IOUtils.makeDirectory(dir, { ignoreExisting: true });
       const hash = await attachment.attachmentHash;
-      await IOUtils.writeUTF8(path, JSON.stringify({ version: 3, hash: hash || null, date: new Date().toISOString(), blocks }));
+      await IOUtils.writeUTF8(path, JSON.stringify({ version: this.BLOCK_CACHE_VERSION, hash: hash || null, date: new Date().toISOString(), blocks }));
     } catch (e) { this.log("saveCache error: " + e); }
   },
 

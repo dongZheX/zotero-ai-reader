@@ -123,3 +123,67 @@ Tests are a headless Node simulation in `test/sim.js`.
   `requireKey`, which shows a status message and opens the preferences pane.
 - The reader selection popup and right-click menu return early when no key is
   set, so they simply don't appear.
+
+## Live debugging: the dev bridge + `scripts/zdev.mjs`
+
+Zotero has no CLI eval, so iterating on reader/DOM behavior by rebuilding and
+hand-testing is painfully slow. The plugin ships an **opt-in eval bridge** for a
+real test loop into a *running* Zotero:
+
+- Pref `extensions.zotero.aireader.devBridge` (default **false**). When true,
+  `startDevBridge()` polls `<DataDir>/aireader-dev/cmd.json` for `{ seq, code }`,
+  runs `code` as an async function body with `this` === `AIReader` (full plugin
+  scope: reader, blocks, DOM), and writes `{ seq, ok, result|error, logs }` to
+  `out.json`.
+- `scripts/zdev.mjs` is the client: `node scripts/zdev.mjs 'return this.version'`
+  or `node scripts/zdev.mjs -f snippet.js`. Available in the snippet: `this`,
+  `Zotero`, `PathUtils`, `IOUtils`, `Services`, `log()`. `return` anything to
+  inspect it (serialized by `_devSafe`).
+- You can **hot-redefine methods** without reinstalling: in a snippet do
+  `this.navigateTo = async function(...){...}; return "patched"`, then exercise
+  it. Bake the winning version into `content/aireader.js` only once it works.
+- Enabling it: set `aireader.devBridge` true (Config Editor or, in another live
+  session, `Zotero.Prefs.set("aireader.devBridge", true)` — note this is
+  debounced and may not survive an immediate quit) and restart; or temporarily
+  flip the `prefs.js` default for a dev build. It only reads one local file and
+  runs it in-process — no network. Keep the default **false** in released xpis.
+
+Autonomous loop used to debug the snapshot jump: swap the xpi into the profile's
+`extensions/`, clear `startupCache` + `extensions/staged/<id>`, quit via
+`osascript -e 'tell application "Zotero" to quit'`, relaunch with `open -a
+Zotero`, poll the bridge for readiness, then drive/measure through zdev.
+
+### Snapshot / non-PDF navigation (hard-won)
+
+- Snapshot/HTML/EPUB blocks have **no page geometry**, so there's no PDF-style
+  `{position}` with rects. We keep a text `anchor` (`_searchAnchor`, ~80 chars)
+  per block and jump by text (`navigateTo` → `_snapshotJump`).
+- **Use the PUBLIC API.** Zotero exposes no public text-search, but it does expose
+  `reader.navigate({ position })` (the documented plugin nav method; it does the
+  cross-compartment `cloneInto` for you). For a snapshot the position is a
+  **`TextPositionSelector` `{ type, start, end }`** — Zotero's own annotation
+  position format. `start`/`end` are offsets into the concatenated text-node
+  content of the rendered `<body>` (exactly what Zotero's `textPositionToRange`
+  walks: raw, NOT whitespace-normalized). Don't drive the view's private
+  `setFindState` — an earlier version did and it was fragile; `navigate` is the
+  stable contract. (There is **no** `reader.find()` in Zotero 7.)
+- Computing `start`/`end` is the ONE place we must read the rendered document;
+  it's isolated in `_readerContentDoc(reader)` (tries `_internalReader
+  ._primaryView._iframeDocument`, then a nested content iframe off
+  `reader._iframeWindow`; feature-detected, returns null → caller degrades).
+  `_textPositionFor(body, query)` (pure, unit-tested) does exact match first,
+  else a whitespace-insensitive match that maps the collapsed hit back to raw
+  offsets (so English text whose DOM spacing differs from the anchor resolves).
+- The `.zotero-ft-cache` text does **not** line up with the rendered body text
+  (it has extra `\n`s and a different length — e.g. 15373 vs 13050 chars), so you
+  cannot compute the selector from the ft-cache alone; it must come from the live
+  rendered body. (Verified via the dev bridge.)
+- **Don't judge scroll success by `window.scrollY`.** A web snapshot (e.g. a Baidu
+  doc) scrolls an **inner container** (`SECTION.mp-layout-content…`), so
+  `window.scrollY` stays 0 even on a successful jump. Measure the inner scroller's
+  `scrollTop` or the matched range's `getBoundingClientRect().top`.
+- Right after a cold `Reader.open`, the content may not be laid out yet and the
+  first jump can land at 0; `navigateTo` retries once after ~450ms.
+- Block schema changes must bump `BLOCK_CACHE_VERSION` — `loadCache` rejects
+  mismatched versions so a doc cached by an older build is re-extracted (otherwise
+  anchorless cached blocks make citations unclickable).

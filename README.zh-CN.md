@@ -7,7 +7,7 @@
 <p>在 Zotero 条目面板里用 AI 读论文。回答带出处，点页码徽标即可跳回 PDF。</p>
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.9.0-3b7ddd?style=flat-square"/>
+  <img alt="version" src="https://img.shields.io/badge/version-0.10.0-3b7ddd?style=flat-square"/>
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7 · 8 · 10 · 11-cc2936?style=flat-square&logo=zotero&logoColor=white"/>
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
@@ -45,6 +45,11 @@ Zotero 条目面板侧栏里的一个对话框。选中一篇论文就能提问�
 | **学术发现** | 顺着论文查**参考文献**、找**相关与后续工作**、按标题/DOI/arXiv 查任意论文——走免费的 Semantic Scholar 引文图。填了 Serper Key 时，关键词检索升级为 Google Scholar（带被引数）。 |
 | **对话内画图** | 模型用 ` ```svg ` 代码块画图，内联渲染（已净化、自动缩放）。生成时不显示源码。 |
 | **连续上下文** | 整段对话是一条连续历史——读过的章节后续天然可见、不重复读；过长时自动 compact。 |
+| **全文翻译** | 把整篇文档翻译成你的输出语言——分段、携带相邻上下文并发翻译（术语前后一致），产出双语子附件、在阅读器里打开（翻译时显示进度条）。 |
+| **网页快照与 HTML** | 不止 PDF，网页快照 / HTML 附件也能总结、问答、翻译——读取 Zotero 的 `.zotero-ft-cache`。快照上的引用通过阅读器全文搜索跳转定位。 |
+| **多篇对比** | 把多篇论文加入对比篮子，一次跨多篇提问。 |
+| **分享材料** | 一键生成一页 Markdown 总结，或分章节的图文 HTML 分享页（嵌入本文图表、手绘 SVG、速问速答卡）。 |
+| **对话多机同步** | 对话持久化进一条随 Zotero 同步的数据笔记，历史跟着你跨机器走。 |
 | **选中弹窗** | 在阅读器里选中文字，可引用、解释（流式，带复制和「写入批注」）、或翻译。 |
 | **你的标注作为上下文** | 读取你已有的高亮和笔记，于是可问「总结我的高亮」。 |
 | **持久化** | 对话历史按附件保存、下次恢复；任意对话可存为 Zotero 笔记。 |
@@ -102,14 +107,25 @@ Zotero.SDT.getReader(attachmentID).materialize()
 
 ```bash
 zip -r -q ai-reader.xpi manifest.json bootstrap.js prefs.js content locale
-node test/sim.js   # → ALL OK
+node test/sim.js        # → ALL OK
+node test/snapshot.js   # → SNAPSHOT OK（快照锚点 + 引用跳转）
 ```
 
 ## 已知限制
 
-- 点击溯源只支持 **PDF 附件**；EPUB 和快照能读但无法定位。
+- **PDF** 点击溯源是精确的（页码 + 坐标）。**快照 / HTML / EPUB** 没有页面坐标，所以引用改为驱动阅读器的全文搜索跳到那句话——对文字可靠，但无法在那里高亮图/表。
 - 超长论文按「最大发送字符数」截断，大上下文模型可调高。
-- 翻译是「选中即译」（整篇可配合 zotero-pdf-translate）。
+
+## 开发
+
+插件内置一个可选的**开发桥**（pref `extensions.zotero.aireader.devBridge`，默认关），给你一个进到*运行中* Zotero 的真实 REPL——调试任何涉及 reader/DOM 的东西都极有用。打开 pref 后：
+
+```bash
+node scripts/zdev.mjs 'return this.version'      # 在运行中的插件作用域里执行代码
+node scripts/zdev.mjs -f snippet.js              # 或从文件读
+```
+
+代码以 async 函数体运行，`this` 就是 `AIReader` 对象（可访问 reader、blocks、DOM），甚至能热替换方法而不用重装。它只读本机一个命令文件、在进程内运行——不走网络。完整工作流见 `CLAUDE.md`。正式构建里默认**关闭**。
 
 ## 致谢与借鉴
 

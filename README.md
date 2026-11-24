@@ -7,7 +7,7 @@
 <p>Read papers with AI inside Zotero's item pane. Answers cite the source; click a page badge to jump back into the PDF.</p>
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-0.9.0-3b7ddd?style=flat-square"/>
+  <img alt="version" src="https://img.shields.io/badge/version-0.10.0-3b7ddd?style=flat-square"/>
   <img alt="zotero" src="https://img.shields.io/badge/Zotero-7 · 8 · 10 · 11-cc2936?style=flat-square&logo=zotero&logoColor=white"/>
   <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square"/>
 </p>
@@ -45,6 +45,11 @@ Two things set it apart from a plain chat box:
 | **Scholarly discovery** | Trace a paper's **references**, find **related & follow-up** work, and look up any paper by title/DOI/arXiv — via the free Semantic Scholar graph. With a Serper key, keyword lookup upgrades to Google Scholar (with citation counts). |
 | **Inline diagrams** | The model draws with a ` ```svg ` block, rendered inline (sanitized, scaled to the panel). Source is hidden while it streams. |
 | **Continuous context** | The conversation is one running history — earlier reads stay visible, so the model doesn't re-read; it auto-compacts when long. |
+| **Full-text translation** | Translate the whole document into your output language — segmented, translated concurrently with neighbour context so terms stay consistent, delivered as a bilingual child attachment you open in the reader (progress bar while it runs). |
+| **Web snapshots & HTML** | Snapshots / HTML attachments (not just PDFs) can be summarized, chatted with, and translated — read from Zotero's `.zotero-ft-cache`. Citations on a snapshot jump via the reader's full-text search. |
+| **Multi-paper compare** | Add papers to a compare basket and ask across them at once. |
+| **Share materials** | Generate a one-page Markdown summary or a section-by-section illustrated HTML share page (embeds the paper's own figures, hand-drawn SVG, Q&A cards). |
+| **Multi-machine chat sync** | Conversations persist into a Zotero-synced data note, so history follows you across machines. |
 | **Selection popup** | Select text in the reader to quote it, explain it (streaming, with copy and "write to annotation"), or translate it. |
 | **Your notes as context** | Reads your existing highlights and notes, so you can ask "summarize my highlights". |
 | **Persistence** | History is saved per attachment and restored next time; save any conversation as a Zotero note. |
@@ -102,14 +107,25 @@ Everything that shapes the model lives in the **system message**: paper context,
 
 ```bash
 zip -r -q ai-reader.xpi manifest.json bootstrap.js prefs.js content locale
-node test/sim.js   # → ALL OK
+node test/sim.js        # → ALL OK
+node test/snapshot.js   # → SNAPSHOT OK  (snapshot anchors + citation navigation)
 ```
 
 ## Limitations
 
-- Click-to-source needs **PDF attachments**; EPUB and snapshots can be read but not located.
+- **PDF** click-to-source is precise (page + coordinates). **Snapshots / HTML / EPUB** have no page geometry, so citations jump by driving the reader's full-text search to the sentence instead — reliable for text, but it can't highlight figures/tables there.
 - Long papers are truncated at "max characters"; raise it for large-context models.
-- Translation is selection-based (pair with zotero-pdf-translate for whole-document).
+
+## Development
+
+The plugin ships an opt-in **dev bridge** (pref `extensions.zotero.aireader.devBridge`, default off) that gives a real REPL into a *running* Zotero — invaluable for anything touching the reader/DOM. Enable the pref, then:
+
+```bash
+node scripts/zdev.mjs 'return this.version'      # run code in the live plugin scope
+node scripts/zdev.mjs -f snippet.js              # …or from a file
+```
+
+Code runs as an async body with `this` === the `AIReader` object (full access to the reader, blocks, DOM); you can even hot-redefine methods without reinstalling. It only reads one local file and runs in-process — no network. See `CLAUDE.md` for the full workflow. Keep the default **off** in released builds.
 
 ## Acknowledgements
 
