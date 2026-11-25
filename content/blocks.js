@@ -179,10 +179,34 @@ Object.assign(AIReader, {
     // jump to. Keep a distinctive text anchor per block instead; citations open
     // the snapshot and full-text-search to it (see navigateTo). `anchor:true`
     // lets the renderer draw a clickable badge even though position==null.
+    // The ft-cache is plain text (markup stripped), so headings are detected
+    // heuristically → type:"heading" so _buildSections forms real sections and
+    // list_sections/read_section work on snapshots too.
     return paras.map((t) => {
       const body = t.length > 2000 ? t.slice(0, 2000) + "…" : t;
-      return { id: id++, type: "paragraph", text: body, position: null, anchor: true, query: this._searchAnchor(t), pageLabel: "", pageHeight: 792 };
+      const type = this._looksLikeHeading(t) ? "heading" : "paragraph";
+      return { id: id++, type: type, text: body, position: null, anchor: true, query: this._searchAnchor(t), pageLabel: "", pageHeight: 792 };
     });
+  },
+
+  // Heuristic heading detector for position-less plain text (ft-cache / scanned
+  // PDF fallback). Conservative: a heading is short, doesn't end like a sentence,
+  // and either is numbered ("3 Method" / "3.1 Setup") or starts with a common
+  // section word. Keeps false positives low so body paragraphs aren't mis-split.
+  _looksLikeHeading(s) {
+    const t = String(s || "").replace(/\s+/g, " ").trim();
+    if (!t || t.length > 70) return false;
+    if (/[.。!?！？,，、;；:]$/.test(t)) return false; // ends like a sentence/clause → not a heading
+    const words = t.split(" ").length;
+    // numbered section: "3 Method", "3.1.2 Setup" — word after the number must be
+    // capitalized or CJK (so "3 people were tested…" isn't mistaken for one), short.
+    // But not a Chinese quantity like "12 个 … / 3 种 …" (a count, not a heading).
+    if (/^\d+\s*[个种类项条张次名位步点款道题例页行列篇章节%％]/.test(t)) return false;
+    if (/^\d+(\.\d+){0,3}\.?\s+[A-Z一-鿿]/.test(t) && words <= 8) return true;
+    // the line IS a known section word (optionally a trailing colon) — anchored so
+    // a sentence that merely STARTS with one ("Results show that…") doesn't match.
+    if (/^(abstract|introduction|related works?|background|preliminaries|motivation|methods?|methodology|approach|model|architecture|experiments?|experimental setup|setup|datasets?|results?|evaluation|analysis|discussion|ablations?|ablation study|limitations?|future work|conclusions?|references?|acknowledg(e)?ments?|appendix|摘要|引言|相关工作|背景|方法|实验|结果|分析|讨论|消融|局限|结论|参考文献|附录)[:：]?$/i.test(t)) return true;
+    return false;
   },
 
   // A contiguous, distinctive substring of a block, used to full-text-search a

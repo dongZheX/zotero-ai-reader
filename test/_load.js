@@ -13,11 +13,13 @@ const MODULES = [
   'content/prompts.js',
   'content/share.js',
   'content/blocks.js',
+  'content/docreader.js',
   'content/annotate.js',
   'content/tools.js',
   'content/chat.js',
   'content/ui.js',
   'content/capture.js',
+  'content/share-agent.js',
 ];
 
 // Load the modules into an already-built ctx (with whatever Zotero/fetch stubs

@@ -183,12 +183,25 @@ Object.assign(AIReader, {
         const webNote = (hasSerper
           ? "需要论文之外的背景、最新进展、术语或相关工作时，可用 web_search 联网搜索、web_fetch 抓取网页正文。"
           : "需要抓取某个网页正文时可用 web_fetch。");
-        const toolNote = "\n\n上面的论文正文可能是节选。你可以调用工具查阅更多内容：list_sections 看章节结构；read_section 读取某一章拿到每句 id；" +
-          "list_figures 列出图表；view_figure 识读某张图/表的视觉内容；highlight 高亮某个句子 id（给 category 和一句话 reason）。" + webNote +
-          "涉及参考文献、相关工作或后续研究时，可用 lookup_paper 查某篇论文、find_references 看本文引用了哪些工作、related_papers 找相关/后续论文（query 留空即当前论文）。" +
-          (deep
-            ? "【深读模式】回答前请主动用 list_sections + read_section 读取所有相关章节，并对相关图/表 view_figure，确保基于充分证据作答。"
-            : "当注入的正文不足以准确回答、或问题涉及具体数据/图表时，请主动调用 read_section / view_figure 查阅后再答；普通问题可直接作答。");
+        // What the tools can actually do is decided by the document's capabilities
+        // (docreader) + whether we found sections — not guessed here. Position-less
+        // docs (HTML/EPUB/snapshot) have no figure/highlight regions; the tool note
+        // only advertises what's available so the model never calls a dead tool.
+        const caps = this._docCaps(state.attachment);
+        const hasSections = this._buildSections(state.blocks).length > 0;
+        const scholarNote = "涉及参考文献、相关工作或后续研究时，可用 lookup_paper 查某篇论文、find_references 看本文引用了哪些工作、related_papers 找相关/后续论文（query 留空即当前论文）。";
+        let toolNote;
+        if (hasSections && caps.regions) {
+          toolNote = "\n\n上面的论文正文可能是节选。你可以调用工具查阅更多内容：list_sections 看章节结构；read_section 读取某一章拿到每句 id；" +
+            "list_figures 列出图表；view_figure 识读某张图/表的视觉内容" + (caps.annotate ? "；highlight 高亮某个句子 id（给 category 和一句话 reason）。" : "。") + webNote + scholarNote +
+            (deep
+              ? "【深读模式】回答前请主动用 list_sections + read_section 读取所有相关章节，并对相关图/表 view_figure，确保基于充分证据作答。"
+              : "当注入的正文不足以准确回答、或问题涉及具体数据/图表时，请主动调用 read_section / view_figure 查阅后再答；普通问题可直接作答。");
+        } else if (hasSections) {
+          toolNote = "\n\n这是" + (caps.label || "网页") + "文档，没有页面坐标（没有图表/高亮工具）。正文已按章节给出，需要更多内容时可 read_section 读取某一章。" + webNote + scholarNote;
+        } else {
+          toolNote = "\n\n上面给出的正文即可直接作答，本文档没有可用的章节/图表工具。" + webNote + scholarNote;
+        }
         sys = this.systemPrompt(ctx) + toolNote + this._skillDirective() + (sumNote ? "\n\n【早期对话要点】\n" + sumNote : "");
       }
       this.setStatus(state, "生成中…", "busy");
@@ -206,8 +219,12 @@ Object.assign(AIReader, {
       // them (shown as collapsible tool blocks) and continue — so tool use is a
       // general capability of normal chat, not just the "通读并标注" button.
       const fmt0 = this._fmt();
-      const tools = opts.multi ? null : this._toolSchemas(fmt0); // multi-paper mode: context is pre-assembled, no single-paper tools
       const tc = { sections: this._buildSections(state.blocks), byId: new Map((state.blocks || []).map((b) => [b.id, b])), run: { keys: [], applied: [] }, tally: {}, reads: 0 };
+      // multi-paper mode: context pre-assembled, no single-paper tools. Otherwise
+      // gate tools by document capability: sections need text, figures/highlight
+      // need page geometry (PDF only) — see content/docreader.js.
+      const dcaps = this._docCaps(state.attachment);
+      const tools = opts.multi ? null : this._toolSchemas(fmt0, { sections: tc.sections.length > 0, figures: dcaps.regions, annotate: dcaps.annotate });
       const toolLog = this._el(state.doc, "div", "aireader-toollog"); let toolLogAdded = false; const grp = {};
       const ensureToolLog = () => { if (!toolLogAdded) { bubble.appendChild(toolLog); toolLogAdded = true; } };
       let answerEl = this._el(state.doc, "div", "aireader-answer"); bubble.appendChild(answerEl);
@@ -283,7 +300,10 @@ Object.assign(AIReader, {
       if (!opts.skipUser) hist.push({ role: "user", content: text });
       hist.push({ role: "assistant", content: full });
       this.saveChat(state.attachment, hist).catch(() => {});
-      if (opts.autoApply) { const { count } = await this.autoApplyDirectives(state, full); this.setStatus(state, count ? ("已自动高亮 " + count + " 处。") : "未识别到可高亮的句子。", count ? "ok" : "muted"); }
+      if (opts.autoApply) {
+        if (!this._docCaps(state.attachment).annotate) { this.setStatus(state, "这是" + (this._docCaps(state.attachment).label || "网页") + "文档，没有页面坐标，无法在原文上高亮（已照常给出文字回答）。", "muted"); }
+        else { const { count } = await this.autoApplyDirectives(state, full); this.setStatus(state, count ? ("已自动高亮 " + count + " 处。") : "未识别到可高亮的句子。", count ? "ok" : "muted"); }
+      }
     } catch (e) {
       bubble.classList.remove("aireader-streaming");
       bubble.textContent = (state.cancel ? "（已停止）" : this._friendlyError(e));

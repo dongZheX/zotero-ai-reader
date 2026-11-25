@@ -181,5 +181,40 @@ Object.assign(AIReader, {
       "- 忠实、通顺，符合" + targetLang + "科技写作习惯，前后术语保持一致。";
   },
 
+  // ---- SHARE AGENT (agentShare) system prompt: the model drives the whole
+  // build itself via tools — plan, read, write each unit, SEE its real rendered
+  // screenshot (render_preview), fix layout, repeat, then finalize. Engine-aware
+  // (deck vs article); reuses the per-unit authoring rules distilled above. ----
+  _shareAgentPrompt(kind, lang, figList, preset, styleNote, canSee) {
+    const isDeck = kind === "deck";
+    const goal = isDeck
+      ? "为这篇论文做一套**可放映幻灯片**（每页一个 <section class=\"slide\">，固定 1920×1080 画布、用 px 布局）。"
+      : "为这篇论文写一篇**图文并茂的深度长文**（每节一个 <section>，结构化、可读）。";
+    const toolDoc =
+      "你有这些工具，自己决定调用顺序：\n" +
+      "· list_sections / read_section：看章节结构、读你要讲的章节原文（拿到 [B<id>] 句子）。\n" +
+      "· list_figures / view_figure：列出论文的图/表，识读你打算引用的图。\n" +
+      "· write_unit({index,title,html})：写第 index " + (isDeck ? "页" : "节") + "（index 从 0 开始、连续递增）。html 是**单个 <section>**（不要 <html>/<style>/其它单元、不要 ``` 围栏）。再次用同一 index 调用会**覆盖**那一单元——这就是你修正排版的方式。\n" +
+      (canSee
+        ? "· render_preview({index}):把该单元按真实样式/画布渲染成**截图**回给你看。看到图后自己判断排版有没有问题(溢出画布/图被裁切/图文重叠/文字被截断/大片空白失衡/元素错位),有问题就改写该 index 再 render_preview 复查。\n"
+        : "· （当前模型不支持看图，没有 render_preview；请凭样式规则一次写好，避免溢出/过密。）\n") +
+      "· finalize({title,tldr?,tags?})：所有单元都写好且排版干净后调用，组装落盘、结束。";
+    const flow = isDeck
+      ? "画布固定 1920×1080，用 px（标题 ~72–104px、正文/要点 ~26–32px、内边距 ~64–72px，不要 vw）。配色/字体用全局 CSS 变量：background:var(--bg);color:var(--fg);，强调 var(--accent)，次要 var(--muted)，标题 font-family:var(--font-display)、正文 var(--font-body)——**不要自己写 <style>，变量已全局定义**。第 0 页封面（大标题+一句话结论+作者/会议），第 1 页「方法总览」（用 [[fig:<id>]] 放一张本文架构/总览图 + 3–5 条要点），倒数第二页「速问速答」（问答卡片 ≥3 组），末页「一句话总结」。信息优先、不是极简海报：每页用 <ul> 4–8 条要点 / 要点卡片 / 对比 <table> 把关键点列全，每条带具体数字/步骤/术语；正文 ≥24px、务必不溢出一屏。"
+      : "每节 <section id=\"secN\">（N=index）<h2>标题</h2>…。第 0 节固定「方法总览」（开头用 [[fig:<id>]] 放一张本文架构/总览图 + <p class=\"lead\"> 概述），末节固定「速问速答」（<div class=\"qa\"><div class=\"q\">…</div><div class=\"a\">…</div></div> ≥5 组）。结构化承载、别写文字墙：<h3> 分点 + <ul> + <table>，<p> 最多 3–4 行断开；关键数字/结论用 <span class=\"highlight\"> 或 <strong>，每节最多 1 个 <div class=\"callout\">；维度流 <div class=\"dim\">、优缺点 <div class=\"pros-cons\">。";
+    const unitW = isDeck ? "页" : "节";
+    const hasFigs = !!(figList && figList.trim() && figList.trim() !== "（无）");
+    const figRule =
+      "【务必用论文里的真实图表——很重要】要展示论文自己的图/表（架构图、流程图、结果曲线、对比表等），在 HTML 里直接写占位 **[[fig:<id>]]**（id 取自下面的清单）——finalize 时它会被替换成**该图的真实截图**。这是放结果图/架构图的**首选**，" +
+      "**不要用 ```svg 去重画论文里已经有的图**（会得到一张糊弄的手绘图，而不是论文的真图）。``` svg 只用来画论文里没有、确实需要你新画的示意图（根 <svg> 带 viewBox、不固定像素宽高，deck 里放进 <section>，article 里放进 <div class=\"svg-wrap\">…<div class=\"caption\">图N·说明</div></div>）。" +
+      (hasFigs ? "方法总览" + unitW + "、以及每个讲架构/结果的" + unitW + "，**只要清单里有合适的图就必须用 [[fig:<id>]] 放进去**；拿不准图里是什么就先 view_figure 看一眼再决定放哪张。" : "（这篇没抽取到可用图表清单，可用 ```svg 画必要的示意图。）") +
+      "\n可用图表清单（id 用于 [[fig:id]]）：\n" + (figList || "（无）");
+    const coverage =
+      "【覆盖完整——最重要】目标是把论文讲全、不漏要点，不是只做几页/几节好看的摘要：通读你需要的章节，为**每个核心贡献**、**每组关键实验/结果**各安排一" + (isDeck ? "页" : "节") + "（别挤成一条），覆盖背景与问题、方法细节（关键设计/公式/步骤）、关键结果（具体数字与对比）、消融/对比、局限与未来。" + (isDeck ? "大约 8–14 页" : "大约 6–11 节") + "，宁可多一" + (isDeck ? "页" : "节") + "也不要省掉重要内容。不臆造、图表不编造，关键论断可带 [B<id>]。";
+    return "你是论文分享助手，用" + lang + "工作。任务：" + goal + "\n" + toolDoc + "\n\n【排版规则】" + flow + "\n" + figRule + "\n\n" + coverage +
+      (canSee ? "\n\n充分利用 render_preview：至少对信息密、带图、带表的单元看一眼真实渲染效果，发现问题就改，直到干净再 finalize。" : "") +
+      this._shareStyleNote() + (styleNote || "") + (isDeck && preset ? ("\n【视觉风格：" + (preset.label || "") + "】" + (preset.note || "")) : "") + this._skillDirective();
+  },
+
   _shareSkillsLoaded: true,
 });

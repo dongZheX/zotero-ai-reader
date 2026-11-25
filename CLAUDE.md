@@ -3,11 +3,32 @@
 A Zotero 7/8/10/11 bootstrap plugin. The plugin is one global `AIReader` object
 split across domain modules under `content/`: `aireader.js` (core seed —
 lifecycle / registration / dev bridge / item logic / micro-utils) loads first,
-then `net` · `prompts` · `share` · `blocks` · `annotate` · `tools` · `chat` ·
-`ui` each `Object.assign(AIReader, {…})` onto it (wired in `bootstrap.js`, in
-that order; cross-module calls are plain `this.*`). Styled by
-`content/style.css`. Automated safety net: a golden snapshot (`test/golden.js`)
-plus focused Node tests.
+then `net` · `prompts` · `share` · `blocks` · `docreader` · `annotate` ·
+`tools` · `chat` · `ui` · `capture` · `share-agent` each
+`Object.assign(AIReader, {…})` onto it (wired in `bootstrap.js`, in that order;
+cross-module calls are plain `this.*`).
+`docreader.js` is the per-document capability layer: `_docReader(att)` is a
+Factory that returns a per-type Strategy (PDF delegates to the geometry
+primitives `renderRegionDataURI`/`applyAnnotation`; HTML/EPUB/text are Null
+Objects — `renderRegion`→null, `annotate`→throws, `figuresIn`→[]), and
+`_docCaps(att)` exposes frozen traits (`regions`/`annotate`/`navigate`). UI
+chips/buttons, agent tool sets (`_agentTools({sections,figures,annotate})`,
+`_shareAgentToolDecls`), and `agentAnnotate` all gate off caps instead of
+re-deriving `block.position` ad hoc — add a new reading type here, not across
+the feature code (think Bridge: features × doc-types).
+`capture.js` renders generated share HTML to a PNG (offscreen HiddenBrowser +
+drawSnapshot→canvas→toDataURL) so the model can SEE its own layout, plus the
+vision probe. `share-agent.js` is `agentShare` — a model-driven tool-calling
+loop that BUILDS the deck/article itself (plan → read → `write_unit` → see the
+real rendered screenshot via `render_preview` → fix → `finalize`), replacing the
+old fixed outline→per-unit→review pipeline; the retained `_finishShare*` /
+`_assemble*` builders are reused for assembly. Styled by `content/style.css`.
+Automated safety net: a golden snapshot (`test/golden.js`) plus focused Node
+tests. The agent's screenshot/vision + loop are smoke-tested via the dev bridge,
+not in Node (they need a live Zotero). Multimodal tool results: a tool's
+`output` may be `{text, images:[dataURI]}`; `_pushToolResults` emits an
+Anthropic `tool_result.content` image block (Sonnet reads it) and degrades to
+text for chat/responses.
 
 ## Workflow (read before committing)
 
@@ -17,9 +38,11 @@ plus focused Node tests.
   and push. Version releases go directly to `main`.
 - **Tests must pass.** `node test/golden.js` must print `GOLDEN OK` (a byte-
   identical snapshot of every deterministic builder — the zero-diff net for
-  refactors) and `node test/{share,snapshot,temperature,abort,retry}.js` must all
-  pass. Add snapshot keys / assertions for any new behavior. When you add a new
-  `content/*.js` module, append it to `test/_load.js` (the shared load order).
+  refactors) and `node test/{share,share-agent,snapshot,temperature,abort,retry,capture,blocks,docreader}.js`
+  must all pass. Add snapshot keys / assertions for any new behavior. When you add
+  a new `content/*.js` module, append it to `test/_load.js` (the shared load order).
+  (`test/sim.js` is a separate integration harness needing an external SDT fixture
+  under `/tmp/zomni/…`; it is not part of the standard suite.)
 - **Scan for secrets before every commit.** Never commit an API key / AK-SK.
   ```bash
   grep -rnEi "sk-[A-Za-z0-9]{20,}" . --exclude-dir=.git   # + any internal gateway key fragments
@@ -218,3 +241,17 @@ Zotero`, poll the bridge for readiness, then drive/measure through zdev.
 - Block schema changes must bump `BLOCK_CACHE_VERSION` — `loadCache` rejects
   mismatched versions so a doc cached by an older build is re-extracted (otherwise
   anchorless cached blocks make citations unclickable).
+- **Sections must work on position-less docs (HTML/snapshot/EPUB), not just PDFs.**
+  Those blocks have `position:null`; `_buildSections` keys off `text`, NOT
+  `position` (an early version required position → 0 sections → `list_sections`
+  returned 0 and `read_section` said "无此节", so the chat/share agents flailed on
+  snapshots). The ft-cache is plain text with markup stripped, so headings are
+  recovered heuristically (`_looksLikeHeading`: numbered "3 Method" / known section
+  words / CJK, with a measure-word guard so "12 个…" isn't a heading). The agents
+  also gate their tools off document capability (see `docreader.js`):
+  `_agentTools({sections,figures,annotate})` / `_shareAgentToolDecls(kind,canSee,
+  {sections,figures})` drop `read_section` when there's no text, and
+  `view_figure`/`list_figures`/`highlight` when `caps.regions`/`caps.annotate` is
+  false (HTML/EPUB) — the full text is injected instead so the model never calls
+  a dead tool. `agentAnnotate` returns early with a clear message when
+  `!caps.annotate` (otherwise it would run a whole loop that can only fail).

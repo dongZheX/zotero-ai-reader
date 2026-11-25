@@ -103,6 +103,13 @@ Object.assign(AIReader, {
     if (state.streaming) return;
     const deep = !!this._deepRead;
     const MAX_TURNS = deep ? 80 : 30, MAX_ANN = deep ? 120 : 60, MAX_READS = deep ? 200 : 40;
+    // Region highlighting needs page geometry (PDF). On HTML/EPUB/snapshot docs
+    // there's nowhere to draw a highlight — don't run a whole agent loop that can
+    // only fail per sentence; say so and point to chat instead. (docreader caps.)
+    if (!this._docCaps(state.attachment).annotate) {
+      this.setStatus(state, "这是" + (this._docCaps(state.attachment).label || "网页") + "文档，没有页面坐标，无法在原文上高亮标注。可以直接用下面的对话提问。", "muted");
+      return;
+    }
     await this.ensureBlocks(state);
     const sections = this._buildSections(state.blocks);
     if (!sections.length) { this.setStatus(state, "无法提取正文结构，无法通读。", "error"); return; }

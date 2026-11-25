@@ -12,14 +12,32 @@
 Object.assign(AIReader, {
   // ----------------------------------------------- agentic read & annotate
   // Neutral tool declarations (JSON-Schema); shaped per API format by _toolSchemas.
-  _agentTools() {
-    const T = [
-      { name: "list_sections", description: "列出论文的章节大纲（标题、页码、句子数）。先调用它了解结构。", parameters: { type: "object", properties: {}, required: [] } },
-      { name: "read_section", description: "读取某一章节的全部句子，返回每句的 id、页码、文本。index 来自 list_sections。", parameters: { type: "object", properties: { index: { type: "integer", description: "章节序号" } }, required: ["index"] } },
-      { name: "highlight", description: "在 PDF 里高亮某一句并加一句话批注。id 必须来自 read_section 返回的 id。", parameters: { type: "object", properties: { id: { type: "integer" }, category: { type: "string", enum: ["contribution", "method", "result", "limitation", "keyterm"] }, reason: { type: "string", description: "一句话理由（作为批注）" } }, required: ["id", "category"] } },
-      { name: "list_figures", description: "列出论文中的图/表（id、页码、标题）。想看某张图就先用它找到 id。", parameters: { type: "object", properties: {}, required: [] } },
-      { name: "view_figure", description: "查看某张图/表的视觉内容：渲染该区域并用多模态模型识读，返回图的文字描述。id 来自 list_figures。", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } },
-    ];
+  // Capability-gated tool set. opts (each default true) comes from the document's
+  // caps + extracted structure, NOT guessed here:
+  //   sections — _buildSections found readable sections (always true once text exists)
+  //   figures  — caps.regions: can render a figure region to an image (PDF only)
+  //   annotate — caps.annotate: can highlight a region in the doc (PDF only)
+  // Position-less docs (HTML/EPUB/snapshot) drop the tools they can't honour so
+  // the model never calls a dead tool or re-reads already-injected text.
+  _agentTools(opts) {
+    const o = opts || {};
+    const sections = o.sections !== false, figures = o.figures !== false, annotate = o.annotate !== false;
+    const T = [];
+    if (sections) {
+      T.push(
+        { name: "list_sections", description: "列出论文的章节大纲（标题、页码、句子数）。先调用它了解结构。", parameters: { type: "object", properties: {}, required: [] } },
+        { name: "read_section", description: "读取某一章节的全部句子，返回每句的 id、页码、文本。index 来自 list_sections。", parameters: { type: "object", properties: { index: { type: "integer", description: "章节序号" } }, required: ["index"] } },
+      );
+    }
+    if (annotate) {
+      T.push({ name: "highlight", description: "在 PDF 里高亮某一句并加一句话批注。id 必须来自 read_section 返回的 id。", parameters: { type: "object", properties: { id: { type: "integer" }, category: { type: "string", enum: ["contribution", "method", "result", "limitation", "keyterm"] }, reason: { type: "string", description: "一句话理由（作为批注）" } }, required: ["id", "category"] } });
+    }
+    if (figures) {
+      T.push(
+        { name: "list_figures", description: "列出论文中的图/表（id、页码、标题）。想看某张图就先用它找到 id。", parameters: { type: "object", properties: {}, required: [] } },
+        { name: "view_figure", description: "查看某张图/表的视觉内容：渲染该区域并用多模态模型识读，返回图的文字描述。id 来自 list_figures。", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } },
+      );
+    }
     // Web search needs a Serper key; only offer it when one is configured so the
     // model doesn't waste turns calling a tool it can't use.
     if ((this.getPref("serperKey") || "").trim()) {
@@ -34,12 +52,14 @@ Object.assign(AIReader, {
     T.push({ name: "finish", description: "读完并标注完后调用，结束。", parameters: { type: "object", properties: { note: { type: "string" } }, required: [] } });
     return T;
   },
-  _toolSchemas(fmt) {
-    const T = this._agentTools();
+  // Shape a neutral tool list ({name,description,parameters}) into one API
+  // format. Shared by _toolSchemas (read&annotate agent) and the share agent.
+  _shapeTools(fmt, T) {
     if (fmt === "anthropic") return T.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
     if (fmt === "responses") return T.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters }));
     return T.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
   },
+  _toolSchemas(fmt, opts) { return this._shapeTools(fmt, this._agentTools(opts)); },
   // Anthropic reads the longest cached *prefix*. A breakpoint on the system
   // block alone caches only the paper/system — the growing conversation is
   // re-read uncached every turn. Add a second, rolling breakpoint on the last
@@ -67,20 +87,45 @@ Object.assign(AIReader, {
     const tool_calls = calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args || {}) } }));
     messages.push({ role: "assistant", content: text || null, tool_calls });
   },
+  // A tool's `output` is normally a JSON/text STRING. For multimodal tools it
+  // may instead be `{ text, images:[dataURI] }` so the model can SEE the result
+  // (e.g. render_preview returns the real rendered screenshot). Anthropic takes
+  // image blocks natively inside tool_result.content (verified: Sonnet reads
+  // them); chat/responses tool messages are text-only, so there we degrade to
+  // the text part. Plain-string outputs are passed through unchanged.
+  _toolResultAnthropic(out) {
+    if (!out || typeof out !== "object" || !Array.isArray(out.images)) return out; // plain string
+    const arr = [];
+    if (out.text) arr.push({ type: "text", text: String(out.text) });
+    for (const uri of out.images) {
+      const m = /^data:(image\/[a-z.+-]+);base64,([\s\S]*)$/i.exec(String(uri || ""));
+      if (m) arr.push({ type: "image", source: { type: "base64", media_type: m[1], data: m[2] } });
+    }
+    return arr.length ? arr : (out.text || "（已生成截图，但无法内联）");
+  },
+  _toolResultText(out) {
+    if (!out || typeof out !== "object" || !Array.isArray(out.images)) return out; // plain string
+    return out.text || "（已生成截图；当前 API 格式不支持在工具结果里回传图片）";
+  },
   _pushToolResults(fmt, messages, results) {
-    if (fmt === "anthropic") { messages.push({ role: "user", content: results.map((r) => ({ type: "tool_result", tool_use_id: r.id, content: r.output })) }); return; }
-    if (fmt === "responses") { for (const r of results) messages.push({ type: "function_call_output", call_id: r.id, output: r.output }); return; }
-    for (const r of results) messages.push({ role: "tool", tool_call_id: r.id, content: r.output });
+    if (fmt === "anthropic") { messages.push({ role: "user", content: results.map((r) => ({ type: "tool_result", tool_use_id: r.id, content: this._toolResultAnthropic(r.output) })) }); return; }
+    if (fmt === "responses") { for (const r of results) messages.push({ type: "function_call_output", call_id: r.id, output: this._toolResultText(r.output) }); return; }
+    for (const r of results) messages.push({ role: "tool", tool_call_id: r.id, content: this._toolResultText(r.output) });
   },
 
   // Group blocks into sections by preceding heading. index == array position.
+  // Text blocks WITHOUT a position are kept (HTML/web-snapshot/EPUB attachments
+  // have no page geometry but their text is still readable + navigable by anchor);
+  // only truly text-less blocks and image/math blocks are skipped. read_section
+  // works off text, and snapshot navigation jumps by text anchor — neither needs
+  // page rects — so a position-less doc now yields real, readable sections.
   _buildSections(blocks) {
     const sections = []; let cur = null;
     const start = (title, page) => { cur = { index: 0, title, page, blockIds: [] }; sections.push(cur); };
     for (const b of blocks || []) {
       if (b.type === "heading") { start((b.text || "（无标题）").slice(0, 80), b.pageLabel); continue; }
       if (b.type === "image" || b.type === "math") continue;
-      if (!b.position || !b.text) continue;
+      if (!b.text) continue;
       if (!cur) start("前言 / 摘要", b.pageLabel);
       cur.blockIds.push(b.id);
     }
@@ -167,6 +212,10 @@ Object.assign(AIReader, {
   // in order. Per-call failures become an error result, never crash the round.
   async _runToolCalls(state, c, calls) {
     const RO = new Set(["list_sections", "read_section", "list_figures", "view_figure", "web_search", "web_fetch", "lookup_paper", "find_references", "related_papers"]);
+    // The share agent supplies its own executor (write_unit/render_preview/
+    // finalize) via c.execTool; those side-effecting tools stay out of RO so
+    // they run serially & in order (so write_unit lands before its render_preview).
+    const exec = (c && c.execTool) || this._execTool;
     const limit = Math.max(1, parseInt(this.getPref("maxParallelTools"), 10) || 3);
     const slots = new Array(calls.length);
     const run1 = async (i) => {
@@ -174,7 +223,7 @@ Object.assign(AIReader, {
       // already in flight will still finish — aborting mid-request would need a
       // signal threaded through the whole network layer).
       if (state && state.cancel) { slots[i] = { output: JSON.stringify({ error: "已取消" }), render: { label: calls[i].name, outcome: "✕ 已取消" } }; return; }
-      try { slots[i] = await this._execTool(state, c, calls[i]); }
+      try { slots[i] = await exec.call(this, state, c, calls[i]); }
       catch (e) { slots[i] = { output: JSON.stringify({ error: String((e && e.message) || e) }), render: { label: calls[i].name, outcome: "✕ 失败" } }; }
     };
     const ro = [], wr = [];
@@ -208,13 +257,13 @@ Object.assign(AIReader, {
       if (!b || !b.position) return { output: JSON.stringify({ error: "no such sentence id " + args.id }), render: { label: "高亮", brief: "id " + args.id, outcome: "✕ 无此句" } };
       const cat = args.category || "keyterm";
       if (this._existingAIKeyAt(state.attachment, b)) return { output: JSON.stringify({ ok: true, note: "already highlighted" }), render: { label: "高亮", cat, brief: (this.CATEGORY_LABELS[cat] || cat), outcome: "· 已存在", jumpId: b.id } };
-      const r = await this.applyAnnotation(state.attachment, b, { type: "highlight", comment: args.reason || "", color: this.colorForCategory(cat) });
+      const r = await this._docReader(state.attachment).annotate(state.attachment, b, { type: "highlight", comment: args.reason || "", color: this.colorForCategory(cat) });
       c.run.keys.push(r.key); c.run.applied.push({ key: r.key, category: cat, blockId: b.id, pageLabel: b.pageLabel, comment: args.reason || "", color: this.colorForCategory(cat) });
       c.tally[cat] = (c.tally[cat] || 0) + 1;
       return { output: JSON.stringify({ ok: true, key: r.key }), render: { label: "高亮", cat, brief: (this.CATEGORY_LABELS[cat] || cat) + (args.reason ? " · " + args.reason : ""), outcome: "p" + b.pageLabel, jumpId: b.id } };
     }
     if (name === "list_figures") {
-      const figs = (state.blocks || []).filter((b) => (b.type === "image" || b.type === "table") && b.position);
+      const figs = this._docReader(state.attachment).figuresIn(state.blocks); // [] for position-less docs (Null Object)
       return { output: JSON.stringify(figs.map((f) => ({ id: f.id, page: f.pageLabel, kind: this.figKind(f.type), caption: (f.text || "").slice(0, 80) }))),
         render: { label: "列出图表", outcome: "→ " + figs.length + " 个", bodyText: figs.map((f) => "[B" + f.id + " p" + f.pageLabel + "] " + this.figKind(f.type) + (f.text ? ": " + f.text.slice(0, 60) : "")).join("\n") || "（无图表）" } };
     }
@@ -222,7 +271,8 @@ Object.assign(AIReader, {
       const b = c.byId.get(args.id);
       if (!b || !b.position) return { output: JSON.stringify({ error: "no such figure id " + args.id }), render: { label: "看图", brief: "id " + args.id, outcome: "✕ 无此图" } };
       try {
-        const dataURI = await this.renderRegionDataURI(state.attachment, b);
+        const dataURI = await this._docReader(state.attachment).renderRegion(state.attachment, b);
+        if (!dataURI) return { output: JSON.stringify({ error: "this document has no renderable figure regions" }), render: { label: "看图", brief: "id " + args.id, outcome: "✕ 不支持" } };
         const lang = this.getPref("language") || "中文";
         const vm = this.buildVisionMessages(this._fmt(), lang, "请详细描述这张" + this.figKind(b.type) + "（第" + b.pageLabel + "页）展示的内容、坐标轴/变量、关键趋势与结论。", dataURI);
         const desc = (await this.callLLM(vm)).trim();

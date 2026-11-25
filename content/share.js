@@ -306,8 +306,10 @@ Object.assign(AIReader, {
     try {
       await this.ensureBlocks(state);
       const lang = this.getPref("language") || "中文";
-      if (engine && engine.engine === "article") { await this._runArticleShare(state, bubble, msg, lang, engine); this.setStatus(state, "", ""); return; }
-      if (engine && engine.engine === "deck") { await this._runDeckShare(state, bubble, msg, lang, engine); this.setStatus(state, "", ""); return; }
+      // Article & deck are built by a model-driven agent loop (agentShare):
+      // the model plans, reads, writes each unit, sees its real rendered
+      // screenshot, fixes layout, and finalizes — see content/share-agent.js.
+      if (engine && (engine.engine === "article" || engine.engine === "deck")) { await this.agentShare(state, bubble, msg, lang, engine); this.setStatus(state, "", ""); return; }
       // one-pager: single streamed pass (readable Markdown). Show a spinner +
       // label while prefilling / streaming so it never looks like a dead box.
       bubble.classList.remove("aireader-streaming");
@@ -336,158 +338,6 @@ Object.assign(AIReader, {
     } finally {
       this._stopWait(state); state.streaming = false; this.updateSendButton(state);
     }
-  },
-  // ARTICLE (paper-craft): deep long-form built section-by-section — plan an
-  // outline, then write each section with its own focused context, steered by
-  // the bundled paper-craft writing voice. Clean reading shell + sticky side TOC.
-  async _runArticleShare(state, bubble, msg, lang, engine) {
-    const blocks = state.blocks;
-    const figList = this._figureListText(blocks);
-    const styleNote = this._articleVoice(engine.style);
-    this._startWait(state, "正在规划结构…"); bubble.textContent = "正在规划结构…";
-    const planCtx = this.buildContextBounded(blocks);
-    let planText = "";
-    try { planText = await this.callLLM([{ role: "system", content: this._shareOutlinePrompt(lang, styleNote) }, { role: "user", content: "论文内容：\n\n" + planCtx }]); } catch (e) { this.log("outline: " + e); }
-    this._stopWait(state);
-    const outline = this._parseShareOutline(planText) || { title: this._shareBaseName(state), tldr: "", tags: [], sections: [{ id: "s1", title: "方法总览", brief: "整体方法与结论" }] };
-    bubble.classList.remove("aireader-streaming"); bubble.textContent = "";
-    const doc = state.doc;
-    const list = this._el(doc, "div", "aireader-share-checklist"); bubble.appendChild(list);
-    const rows = outline.sections.map((s) => { const r = this._el(doc, "div", "aireader-share-step", "○ " + s.title); list.appendChild(r); return r; });
-    const sectionHtmls = [];
-    for (let i = 0; i < outline.sections.length && !state.cancel; i++) {
-      const s = outline.sections[i];
-      rows[i].textContent = s.title; rows[i].classList.add("aireader-share-step-cur");
-      this._startWait(state, "正在生成：" + s.title + "（" + (i + 1) + "/" + outline.sections.length + "）");
-      const secCtx = this.buildRetrievedContext(blocks, s.title + " " + s.brief);
-      let acc = "";
-      const res = await this._streamAnswer(
-        [{ role: "system", content: this._shareSectionPrompt(lang, s, figList, styleNote, i === 0) }, { role: "user", content: "论文内容：\n\n" + secCtx }],
-        null,
-        (d) => { this._stopWait(state); acc += d; this.setStatus(state, "正在生成：" + s.title + "（" + (i + 1) + "/" + outline.sections.length + "）… " + acc.length + " 字", "busy"); },
-        () => state.cancel, {},
-      );
-      this._stopWait(state);
-      sectionHtmls.push(this._stripHtmlFence(res.text || acc || ""));
-      rows[i].textContent = "✓ " + s.title; rows[i].classList.remove("aireader-share-step-cur"); rows[i].classList.add("aireader-share-step-done");
-    }
-    if (state.cancel) { bubble.appendChild(this._el(doc, "div", "aireader-meta", "（已停止）")); return; }
-    const resolver = async (id) => { const b = blocks.find((x) => x.id === id); if (!b) return null; try { return await this.renderRegionDataURI(state.attachment, b); } catch (e) { return null; } };
-    const regen = async (i, v, curHtml) => {
-      const s = outline.sections[i];
-      const secCtx = this.buildRetrievedContext(blocks, s.title + " " + s.brief);
-      const fixUser = "论文内容：\n\n" + secCtx + "\n\n【排版修复任务】这一章渲染后有排版问题：" + v.issue + "\n修复要求：" + v.fix + "\n下面是当前版本的 HTML，请在不丢失信息的前提下修正排版，只输出修正后的单个 <section>（不要解释、不要 ``` 围栏）：\n" + curHtml;
-      const res = await this._streamAnswer([{ role: "system", content: this._shareSectionPrompt(lang, s, figList, styleNote, i === 0) }, { role: "user", content: fixUser }], null, () => {}, () => state.cancel, {});
-      return this._stripHtmlFence(res.text || "");
-    };
-    const finalUnits = await this._reviewAndFix(state, bubble, rows, "article", sectionHtmls, { sections: outline.sections, resolver: resolver, regen: regen });
-    await this._finishShareArticle(state, bubble, msg, outline, finalUnits, engine);
-  },
-  // DECK (frontend-slides, MIT): same planning→per-step UX as the article engine
-  // (a ○/✓ checklist) — plan the slides, then generate each <section> slide on
-  // its own. Smaller chunks = faster first feedback on slow models; we inline the
-  // real <deck-stage> runtime + preset :root at the end.
-  async _runDeckShare(state, bubble, msg, lang, engine) {
-    const blocks = state.blocks;
-    const figList = this._figureListText(blocks);
-    const preset = this._deckPreset(engine.preset);
-    this._startWait(state, "正在规划幻灯…"); bubble.textContent = "正在规划幻灯…";
-    const planCtx = this.buildContextBounded(blocks);
-    let planText = "";
-    try { planText = await this.callLLM([{ role: "system", content: this._deckOutlinePrompt(lang) }, { role: "user", content: "论文内容：\n\n" + planCtx }]); } catch (e) { this.log("deck outline: " + e); }
-    this._stopWait(state);
-    const outline = this._parseShareOutline(planText) || { title: this._shareBaseName(state), sections: [
-      { id: "s1", title: "封面", brief: "标题 + 一句话结论 + 作者/会议" },
-      { id: "s2", title: "方法总览", brief: "整体方法论鸟瞰 + 总览图" },
-      { id: "s3", title: "关键结果", brief: "最有说服力的数字与对比" },
-      { id: "s4", title: "一句话总结", brief: "值不值得读、适合谁" },
-    ] };
-    bubble.classList.remove("aireader-streaming"); bubble.textContent = "";
-    const doc = state.doc;
-    const list = this._el(doc, "div", "aireader-share-checklist"); bubble.appendChild(list);
-    const rows = outline.sections.map((s) => { const r = this._el(doc, "div", "aireader-share-step", "○ " + s.title); list.appendChild(r); return r; });
-    const slideHtmls = [];
-    for (let i = 0; i < outline.sections.length && !state.cancel; i++) {
-      const s = outline.sections[i];
-      rows[i].textContent = s.title; rows[i].classList.add("aireader-share-step-cur");
-      this._startWait(state, "正在生成幻灯：" + s.title + "（" + (i + 1) + "/" + outline.sections.length + "）");
-      const secCtx = this.buildRetrievedContext(blocks, s.title + " " + s.brief);
-      let acc = "";
-      const res = await this._streamAnswer(
-        [{ role: "system", content: this._deckSlidePrompt(lang, preset, s, figList, i === 0, i === 1) }, { role: "user", content: "论文内容：\n\n" + secCtx }],
-        null,
-        (d) => { this._stopWait(state); acc += d; this.setStatus(state, "正在生成幻灯：" + s.title + "（" + (i + 1) + "/" + outline.sections.length + "）… " + acc.length + " 字", "busy"); },
-        () => state.cancel, {},
-      );
-      this._stopWait(state);
-      slideHtmls.push(this._stripHtmlFence(res.text || acc || ""));
-      rows[i].textContent = "✓ " + s.title; rows[i].classList.remove("aireader-share-step-cur"); rows[i].classList.add("aireader-share-step-done");
-    }
-    if (state.cancel) { bubble.appendChild(this._el(doc, "div", "aireader-meta", "（已停止）")); return; }
-    const resolver = async (id) => { const b = blocks.find((x) => x.id === id); if (!b) return null; try { return await this.renderRegionDataURI(state.attachment, b); } catch (e) { return null; } };
-    const regen = async (i, v, curHtml) => {
-      const s = outline.sections[i];
-      const secCtx = this.buildRetrievedContext(blocks, s.title + " " + s.brief);
-      const fixUser = "论文内容：\n\n" + secCtx + "\n\n【排版修复任务】这一页幻灯渲染后有排版问题：" + v.issue + "\n修复要求：" + v.fix + "\n下面是当前版本的 HTML，请在不丢失信息、保持 1920×1080 画布与 px 布局的前提下修正排版，只输出修正后的单个 <section>（不要解释、不要 ``` 围栏）：\n" + curHtml;
-      const res = await this._streamAnswer([{ role: "system", content: this._deckSlidePrompt(lang, preset, s, figList, i === 0, i === 1) }, { role: "user", content: fixUser }], null, () => {}, () => state.cancel, {});
-      return this._stripHtmlFence(res.text || "");
-    };
-    const finalUnits = await this._reviewAndFix(state, bubble, rows, "deck", slideHtmls, { sections: outline.sections, resolver: resolver, regen: regen, deckPresetVars: preset.rootVars, deckFonts: preset.fonts });
-    await this._finishShareDeck(state, bubble, msg, finalUnits.join("\n"), engine, preset);
-  },
-  // Visual self-review loop: screenshot each generated unit (slide/section) as it
-  // really renders (via capture.js), ask the model to spot layout problems,
-  // re-generate the broken ones, and re-check — until clean (or MAX_ROUNDS, or a
-  // round changes nothing). Needs a vision-capable model; degrades to a no-op
-  // (CSS fixes still apply) when disabled or unavailable. Mutates/returns `units`
-  // (raw <section> fragments, [[fig]] placeholders intact for the caller's embed).
-  // meta = { sections, resolver, regen, deckPresetVars?, deckFonts? }.
-  async _reviewAndFix(state, bubble, rows, kind, units, meta) {
-    if (this.getPref("shareVisualReview") === false) return units;
-    const doc = state.doc;
-    const W = kind === "deck" ? 1920 : 1040;
-    const H = kind === "deck" ? 1080 : 1800;
-    const MAX_ROUNDS = 4;
-    let statusRow;
-    try {
-      if (!(await this._visionAvailable())) {
-        bubble.appendChild(this._el(doc, "div", "aireader-meta", "（当前模型不支持看图，已跳过视觉自检；排版样式修复仍生效）"));
-        return units;
-      }
-      statusRow = this._el(doc, "div", "aireader-share-wait"); bubble.appendChild(statusRow);
-      let toCheck = units.map((_, i) => i); // first round checks everything
-      for (let round = 1; round <= MAX_ROUNDS && toCheck.length && !state.cancel; round++) {
-        const problems = [];
-        for (const i of toCheck) {
-          if (state.cancel) break;
-          statusRow.textContent = "视觉自检 第 " + round + " 轮 · 检查 " + meta.sections[i].title;
-          try {
-            const embedded = this._svgFencesToInline(await this._embedFigures(units[i], meta.resolver));
-            const capHtml = kind === "deck" ? this._deckSlideCaptureHtml(embedded, meta.deckPresetVars, meta.deckFonts) : this._articleSectionCaptureHtml(embedded);
-            const png = await this._renderHtmlToPng(capHtml, { width: W, height: H });
-            const v = await this._reviewUnitVisually(kind, png);
-            if (!v.ok && v.issue) problems.push({ i: i, v: v });
-          } catch (e) { this.log("visual review unit " + i + ": " + (e && e.message)); }
-        }
-        if (!problems.length) break;
-        const next = [];
-        for (const p of problems) {
-          if (state.cancel) break;
-          statusRow.textContent = "视觉自检 第 " + round + " 轮 · 修正 " + meta.sections[p.i].title;
-          try {
-            const fixed = await meta.regen(p.i, p.v, units[p.i]);
-            if (fixed && fixed.trim() && fixed !== units[p.i]) {
-              units[p.i] = fixed;
-              if (rows && rows[p.i]) rows[p.i].textContent = "✓ " + meta.sections[p.i].title + "（已修版）";
-              next.push(p.i); // re-check only what changed
-            }
-          } catch (e) { this.log("visual regen " + p.i + ": " + (e && e.message)); }
-        }
-        toCheck = next;
-      }
-    } catch (e) { this.log("visual review loop: " + (e && e.message)); }
-    finally { try { if (statusRow) statusRow.remove(); } catch (e) {} }
-    return units;
   },
   async _finishShareText(state, bubble, msg, spec, text) {
     this.enhanceMessage(state, bubble, text);

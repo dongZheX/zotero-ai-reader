@@ -19,6 +19,8 @@ async function startup({ id, version, rootURI }) {
   try { Services.scriptloader.loadSubScript(rootURI + "content/share.js"); } catch (e) { Zotero.logError(e); }
   // Block model + context builders + snapshot navigation.
   try { Services.scriptloader.loadSubScript(rootURI + "content/blocks.js"); } catch (e) { Zotero.logError(e); }
+  // Per-document capability strategy (PDF vs HTML/EPUB/text) — one source of truth.
+  try { Services.scriptloader.loadSubScript(rootURI + "content/docreader.js"); } catch (e) { Zotero.logError(e); }
   // Read-&-annotate agent + annotation writers + directive application.
   try { Services.scriptloader.loadSubScript(rootURI + "content/annotate.js"); } catch (e) { Zotero.logError(e); }
   // Agent tool-calling loop + web tools + scholarly discovery.
@@ -29,6 +31,8 @@ async function startup({ id, version, rootURI }) {
   try { Services.scriptloader.loadSubScript(rootURI + "content/ui.js"); } catch (e) { Zotero.logError(e); }
   // Share HTML → PNG screenshot + visual self-review (needs ui's buildVisionMessages).
   try { Services.scriptloader.loadSubScript(rootURI + "content/capture.js"); } catch (e) { Zotero.logError(e); }
+  // Model-driven share agent loop (needs capture's screenshot/vision + share builders).
+  try { Services.scriptloader.loadSubScript(rootURI + "content/share-agent.js"); } catch (e) { Zotero.logError(e); }
   AIReader.init({ id, version, rootURI });
   await AIReader.registerAll();
 }

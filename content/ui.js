@@ -138,7 +138,7 @@ Object.assign(AIReader, {
     const state = {
       item, attachment: null, blocks: null, doc, body,
       status, chatMsgs, input, send, modelPill, skillBtn, chips, composer, footer, preview,
-      genBtn, optBtn, basketBar, basket: [], multiMode: false,
+      genBtn, optBtn, agentBtn, basketBar, basket: [], multiMode: false,
       modelMenu: null, modelList: null, skillMenu: null, popMenu: null, _onDoc: null, _onSkillDoc: null, _onPopDoc: null, streaming: false, cancel: false,
     };
     this._bodyState.set(body, state);
@@ -230,7 +230,11 @@ Object.assign(AIReader, {
     if (!state || !state.chips) return;
     const doc = state.doc, body = state.body;
     state.chips.textContent = "";
+    // Hide chips that need a capability this document lacks (auto-highlight needs
+    // page geometry). Default to allowed until the attachment type is known.
+    const caps = state.attachment ? this._docCaps(state.attachment) : null;
     for (const p of this.currentSkill().presets.concat(this.COMMON_PRESETS)) {
+      if (p.autoApply && caps && !caps.annotate) continue; // 自动高亮: no region to highlight
       const c = this._el(doc, "button", "aireader-chip", p.label);
       c.addEventListener("click", () => this.onChatSend(body, p.q, { broad: p.broad, autoApply: p.autoApply, annos: p.annos, withFigures: p.withFigures }));
       state.chips.appendChild(c);
@@ -472,6 +476,14 @@ Object.assign(AIReader, {
       let blocks = this._blockStore.get(att.key);
       if (!blocks) { const disk = await this.loadCache(att); if (disk && disk.blocks) { blocks = disk.blocks; this._blockStore.set(att.key, blocks); } }
       if (blocks) state.blocks = blocks;
+
+      // Now the document type is known: hide features it can't support (region
+      // highlight on HTML/snapshot) and re-render the capability-gated chips.
+      try {
+        const caps = this._docCaps(att);
+        if (state.agentBtn) state.agentBtn.style.display = caps.annotate ? "" : "none";
+        this.renderChips(state);
+      } catch (e) { this.log("caps gating: " + e); }
 
       // conversation: memory -> disk
       let hist = this._chatStore.get(att.key);
