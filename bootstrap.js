@@ -27,6 +27,8 @@ async function startup({ id, version, rootURI }) {
   try { Services.scriptloader.loadSubScript(rootURI + "content/chat.js"); } catch (e) { Zotero.logError(e); }
   // Panel UI + rendering + reader selection popup (loaded last; carries _el/setStatus/requireKey).
   try { Services.scriptloader.loadSubScript(rootURI + "content/ui.js"); } catch (e) { Zotero.logError(e); }
+  // Share HTML → PNG screenshot + visual self-review (needs ui's buildVisionMessages).
+  try { Services.scriptloader.loadSubScript(rootURI + "content/capture.js"); } catch (e) { Zotero.logError(e); }
   AIReader.init({ id, version, rootURI });
   await AIReader.registerAll();
 }

@@ -17,6 +17,7 @@ const MODULES = [
   'content/tools.js',
   'content/chat.js',
   'content/ui.js',
+  'content/capture.js',
 ];
 
 // Load the modules into an already-built ctx (with whatever Zotero/fetch stubs
